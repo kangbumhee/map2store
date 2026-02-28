@@ -104,10 +104,12 @@ class SmartStoreAPI {
     const sellerPhone = settings?.sellerPhone || '010-7253-0101';
     const deliveryCompany = settings?.deliveryCompany || 'CJGLS';
 
-    // 대표 이미지
-    const representativeImage = images.length > 0 ? { url: images[0] } : null;
-    // 추가 이미지 (최대 4개)
-    const optionalImages = images.slice(1, 5).map(url => ({ url }));
+    // 대표/추가 이미지 정규화 (string 또는 { url } 모두 지원)
+    const normalizedImages = (images || [])
+      .map(img => (typeof img === 'string' ? img : img?.url))
+      .filter(Boolean);
+    const representativeImage = normalizedImages.length > 0 ? { url: normalizedImages[0] } : null;
+    const optionalImages = normalizedImages.slice(1, 5).map(url => ({ url }));
 
     // 기본 가격
     const basePrice = sizes.length > 0 ? Math.min(...sizes.map(s => s.price)) : 90000;
@@ -165,10 +167,6 @@ class SmartStoreAPI {
       seoInfo: {
         pageTitle: name,
         metaDescription: description?.substring(0, 150) || name
-      },
-      purchaseQuantityInfo: {
-        minPurchaseQuantity: 0,
-        maxPurchaseQuantity: 0
       }
     };
 
@@ -226,20 +224,45 @@ class SmartStoreAPI {
 
   // ── 이미지 업로드 (URL → 네이버 호스팅) ──
   async uploadImages(imageUrls) {
-    const results = [];
-    for (const url of imageUrls.slice(0, 5)) {
+    const uploaded = [];
+    for (const url of imageUrls.slice(0, 10)) {
       try {
-        const imgResp = await fetch(url, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-        });
-        if (!imgResp.ok) continue;
-        const blob = await imgResp.blob();
-        if (blob.size < 1000) continue;
+        // 이미지 다운로드
+        const resp = await fetch(url);
+        if (!resp.ok) { console.warn('[SmartStore] 이미지 다운로드 실패:', url); continue; }
+        const blob = await resp.blob();
+        if (blob.size < 1000) { console.warn('[SmartStore] 이미지 너무 작음:', url); continue; }
 
+        // PNG → JPEG 변환 (네이버는 PNG 업로드 시 400 에러)
+        let uploadBlob = blob;
+        if (blob.type === 'image/png' || url.endsWith('.png')) {
+          const objectUrl = URL.createObjectURL(blob);
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+            img.src = objectUrl;
+          });
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0);
+          uploadBlob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.92));
+          URL.revokeObjectURL(objectUrl);
+          if (!uploadBlob) {
+            console.warn('[SmartStore] JPEG 변환 실패:', url);
+            continue;
+          }
+          console.log(`[SmartStore] PNG→JPEG 변환: ${blob.size} → ${uploadBlob.size}`);
+        }
+
+        // 네이버 업로드
         const formData = new FormData();
-        formData.append('imageFiles', blob, `product_${Date.now()}.jpg`);
-
-        await this.ensureToken();
+        formData.append('imageFiles', uploadBlob, 'product.jpg');
         const uploadResp = await fetch('https://api.commerce.naver.com/external/v1/product-images/upload', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${this.accessToken}` },
@@ -248,15 +271,19 @@ class SmartStoreAPI {
 
         if (uploadResp.ok) {
           const data = await uploadResp.json();
-          if (data.images && data.images.length > 0) {
-            results.push(data.images[0].url);
+          if (data.images?.[0]?.url) {
+            uploaded.push({ url: data.images[0].url });
+            console.log(`[SmartStore] ✅ 이미지 업로드 성공: ${data.images[0].url}`);
           }
+        } else {
+          const err = await uploadResp.json().catch(() => ({}));
+          console.warn('[SmartStore] 이미지 업로드 실패:', uploadResp.status, err);
         }
       } catch (e) {
-        console.error('[SmartStore] 이미지 업로드 실패:', url, e);
+        console.error('[SmartStore] 이미지 처리 오류:', e);
       }
     }
-    return results;
+    return uploaded;
   }
 }
 

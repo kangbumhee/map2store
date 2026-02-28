@@ -1102,8 +1102,22 @@ Strict: No fantasy elements. No added accessories. Must look like the same produ
         }
       }
 
+      if (imageUrls.length === 0 && state.capturedImage) {
+        prodLog('⚠️ AI 이미지 없음, 캡처 이미지를 대표 이미지로 사용');
+        try {
+          const resp = await chrome.runtime.sendMessage({
+            action: 'cloudinary_upload',
+            base64: state.capturedImage,
+            folder: 'map2model-products'
+          });
+          if (resp.success) imageUrls.push(resp.url);
+        } catch (e) {
+          // ignore
+        }
+      }
+
       if (imageUrls.length === 0) {
-        prodLog('❌ 업로드할 이미지가 없습니다. AI 생성을 다시 실행해주세요.', 'err');
+        prodLog('❌ 업로드할 이미지가 없습니다.', 'err');
         return;
       }
 
