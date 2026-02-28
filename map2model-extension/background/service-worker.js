@@ -330,25 +330,25 @@ async function fetchApiyiText(prompt, apiKey, maxTokens = 8192) {
 }
 
 async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio = '9:16') {
-  // Nano Banana 일반 — $0.02/장
-  const url = 'https://api.apiyi.com/v1beta/models/gemini-2.5-flash-image:generateContent';
+  // Nano Banana 2 (공식 문서 기준)
+  const url = 'https://api.apiyi.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent';
   const parts = [];
 
-  // 참조 이미지 (최대 3장) — snake_case 사용
+  // 참조 이미지 (최대 3장) — camelCase (공식 문서 기준)
   const maxRef = Math.min(referenceImages.length, 3);
   for (let i = 0; i < maxRef; i++) {
     const img = referenceImages[i];
     if (img.startsWith('data:')) {
       const match = img.match(/^data:image\/([a-z+]+);base64,(.+)$/);
       if (match) {
-        parts.push({ inline_data: { mime_type: `image/${match[1]}`, data: match[2] } });
+        parts.push({ inlineData: { mimeType: `image/${match[1]}`, data: match[2] } });
       }
     }
   }
   parts.push({ text: prompt });
 
   const body = JSON.stringify({
-    contents: [{ role: 'user', parts }],
+    contents: [{ parts }],
     generationConfig: {
       responseModalities: ['IMAGE'],
       imageConfig: {
@@ -358,14 +358,16 @@ async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio
     }
   });
 
-  // 최대 3회 재시도, 타임아웃 90초
+  // 최대 3회 재시도, 타임아웃 180초
   const MAX_RETRIES = 3;
-  const TIMEOUT_MS = 90000;
+  const TIMEOUT_MS = 180000;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+      console.log(`[SW] 이미지 생성 시도 ${attempt}/${MAX_RETRIES} (Nano Banana 2, 2K)`);
 
       const resp = await fetch(url, {
         method: 'POST',
@@ -380,7 +382,7 @@ async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio
 
       if (resp.status === 429) {
         const waitSec = 10 * attempt;
-        console.warn(`[SW] 이미지 생성 429 Rate Limit, ${waitSec}초 대기 (${attempt}/${MAX_RETRIES})`);
+        console.warn(`[SW] 429 Rate Limit, ${waitSec}초 대기 (${attempt}/${MAX_RETRIES})`);
         await new Promise(r => setTimeout(r, waitSec * 1000));
         continue;
       }
@@ -402,6 +404,7 @@ async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio
         const inlineData = part.inlineData || part.inline_data;
         if (inlineData?.data) {
           const mimeType = inlineData.mimeType || inlineData.mime_type || 'image/png';
+          console.log(`[SW] ✅ 이미지 생성 성공 (시도 ${attempt})`);
           return `data:${mimeType};base64,${inlineData.data}`;
         }
       }
