@@ -63,7 +63,9 @@
 
   // ── 설정 로드/저장 ──
   async function loadSettings() {
-    const keys = ['gimi9_token', 'apiyi_key', 'naver_client_id', 'naver_client_secret', 'category_id', 'return_info'];
+    const keys = ['gimi9_token', 'apiyi_key', 'naver_client_id', 'naver_client_secret',
+      'category_id', 'return_info', 'outbound_code', 'return_address_id',
+      'delivery_company', 'seller_phone'];
     const stored = await chrome.storage.local.get(keys);
     if (stored.gimi9_token) $('set-gimi9').value = stored.gimi9_token;
     if (stored.apiyi_key) $('set-apiyi').value = stored.apiyi_key;
@@ -71,6 +73,10 @@
     if (stored.naver_client_secret) $('set-naver-secret').value = stored.naver_client_secret;
     if (stored.category_id) $('set-category-id').value = stored.category_id;
     if (stored.return_info) $('set-return-info').value = stored.return_info;
+    if (stored.outbound_code) $('set-outbound-code').value = stored.outbound_code;
+    if (stored.return_address_id) $('set-return-address-id').value = stored.return_address_id;
+    if (stored.delivery_company) $('set-delivery-company').value = stored.delivery_company;
+    if (stored.seller_phone) $('set-seller-phone').value = stored.seller_phone;
   }
 
   function getSetting(key) {
@@ -293,6 +299,10 @@
       const coords = [[sw[0],sw[1]], [ne[0],sw[1]], [ne[0],ne[1]], [sw[0],ne[1]], [sw[0],sw[1]]];
       mapLog(`🚀 전송: ${name}`);
       sendPolygon(coords, name, autoMesh, true);
+      if ($('prod-region-auto')?.checked) {
+        $('prod-region').value = name;
+        $('prod-name').value = `${name} 3D 지형 모형 액자`;
+      }
       return;
     }
 
@@ -340,9 +350,11 @@
     mapLog(`🚀 전송: ${names}`);
     sendPolygon(finalCoords, names, autoMesh, useRect);
 
-    // 상품 페이지에 지역명 전달
-    $('prod-region').value = names;
-    $('prod-name').value = `${names} 3D 지형 모형 액자`;
+    // 상품 페이지에 지역명 전달 (체크박스가 체크되어 있을 때만)
+    if ($('prod-region-auto')?.checked) {
+      $('prod-region').value = names;
+      $('prod-name').value = `${names} 3D 지형 모형 액자`;
+    }
   }
 
   function sendPolygon(coords, name, autoMesh, isRect) {
@@ -411,7 +423,24 @@
       $('ai-section-limit-label').textContent = `${val} / 7`;
       const cost = (val * 0.02).toFixed(2);
       $('ai-cost-estimate').textContent = `약 $${cost} (${Math.round(val * 27)}원)`;
+      $('section-select-area').style.display = val > 0 ? 'block' : 'none';
+      const checks = document.querySelectorAll('.sec-chk');
+      let checked = 0;
+      checks.forEach(chk => {
+        if (checked < val) { chk.checked = true; checked++; }
+        else { chk.checked = false; }
+      });
     });
+    document.addEventListener('change', (e) => {
+      if (e.target.classList.contains('sec-chk')) {
+        const checked = document.querySelectorAll('.sec-chk:checked').length;
+        $('ai-section-limit').value = checked;
+        $('ai-section-limit-label').textContent = `${checked} / 7`;
+        const cost = (checked * 0.02).toFixed(2);
+        $('ai-cost-estimate').textContent = `약 $${cost} (${Math.round(checked * 27)}원)`;
+      }
+    });
+    $('ai-section-limit').dispatchEvent(new Event('input'));
 
     // Step 4: 미리보기
     $('preview-confirm').addEventListener('click', () => setStep(5));
@@ -610,11 +639,7 @@
     _aiGenerating = true;
 
     const apiKey = getSetting('apiyi_key');
-    if (!apiKey) {
-      prodLog('❌ 설정에서 Nano Banana API Key를 입력하세요', 'err');
-      _aiGenerating = false;
-      return;
-    }
+    if (!apiKey) { prodLog('❌ 설정에서 Nano Banana API Key를 입력하세요', 'err'); _aiGenerating = false; return; }
 
     const prodName = $('prod-name').value.trim() || '3D 지형 모형 액자';
     const prodRegion = $('prod-region').value.trim() || '지역';
@@ -623,151 +648,141 @@
     const hasSamples = state.sampleImages.length > 0;
     const hasCapture = !!state.capturedImage;
 
+    // 체크된 섹션 인덱스 수집
+    const checkedSections = [];
+    document.querySelectorAll('.sec-chk:checked').forEach(chk => {
+      checkedSections.push(parseInt(chk.dataset.sec, 10));
+    });
+    const sectionLimit = checkedSections.length;
+    prodLog(`🎯 이미지 생성: ${sectionLimit}개 섹션 (${checkedSections.map(i => i + 1).join(',')})`);
+
     $('ai-gen-result').style.display = 'none';
     $('ai-gen-progress').style.display = 'block';
-    updateAIProgress(0, '상세페이지 기획 중...');
+    updateAIProgress(0, '시작...');
 
     try {
-      // 섹션 수 제한
-      const sectionLimit = parseInt($('ai-section-limit')?.value || '7', 10);
-      prodLog(`🎯 이미지 생성 제한: ${sectionLimit}개 (0=텍스트만)`);
+      const generateHero = checkedSections.includes(0) && hasCapture;
 
-      const generateHero = sectionLimit > 0 && hasCapture;
-
-      // ═══════════════════════════════════════
-      // 0단계: 실물 + 캡처 → 합성 대표 이미지 생성
-      // ═══════════════════════════════════════
-      let heroImage = null;
-
-      if (generateHero) {
-        prodLog('🎨 대표 이미지 생성 중 (캡처 맵 → 실물 액자 스타일)...');
-        updateAIProgress(5, '대표 이미지 생성 중...');
-
-        // 참조 이미지: 실물 샘플(최대 1장) + 캡처 이미지
-        const refImages = [];
-        if (hasSamples) refImages.push(state.sampleImages[0]);
-        refImages.push(state.capturedImage);
-
-        const heroPrompt = hasSamples
-          ? `Look at the reference photos carefully.
-
-The FIRST image is a real photograph of a 3D printed terrain model in a black wooden frame. This is the actual physical product - notice the raised terrain, buildings, roads, green areas, and water features all in 3D relief.
-
-The SECOND image is a digital map capture that needs to be visualized as if it were 3D printed in the exact same style as the first photo.
-
-Create a photorealistic product photo showing the SECOND map as a completed 3D printed terrain model inside a black wooden frame, exactly matching the style, texture, and quality of the FIRST reference photo.
-
-Requirements:
-- Same black wooden frame style as reference
-- 3D raised terrain with buildings, roads, greenery visible
-- Realistic lighting and shadows on the 3D surface
-- Product photo on clean white/light background
-- Held by hand or displayed on a wooden desk
-- NO text, watermarks, or labels on the image
-- Professional e-commerce product photography style`
-
-          : `Create a photorealistic product photo of a 3D printed terrain model inside an elegant black wooden frame.
-
-The terrain should match this captured map - showing the landscape, roads, buildings, water, and green areas in raised 3D relief.
-
-Requirements:
-- Black wooden picture frame
-- 3D raised terrain clearly visible with buildings, roads, parks
-- Realistic lighting creating shadows on terrain features
-- Product photo on clean background
-- Professional e-commerce product photography
-- NO text, watermarks, or labels`;
-
-        try {
-          const heroResp = await chrome.runtime.sendMessage({
-            action: 'apiyi_image',
-            prompt: heroPrompt,
-            apiKey: apiKey,
-            referenceImages: refImages,
-            aspectRatio: '3:4'
-          });
-          if (heroResp.success) {
-            heroImage = heroResp.imageData;
-            prodLog('✅ 대표 이미지 생성 완료!', 'ok');
-          } else {
-            prodLog(`⚠️ 대표 이미지 실패: ${heroResp.error} — 캡처 이미지 사용`);
-          }
-        } catch (e) {
-          prodLog(`⚠️ 대표 이미지 오류: ${e.message}`);
-        }
-      }
-
-      updateAIProgress(15, '기획 텍스트 생성 중...');
+      // 사이즈 텍스트
+      const sizesText = sizes.map(s => `${s.label}: ${s.width}×${s.height}mm — ${s.price.toLocaleString()}원`).join('\n');
+      const sizeInfo = sizes.length > 0 ? `${sizes[0].width}×${sizes[0].height}mm` : '250×174mm';
 
       // ═══════════════════════════════════════
-      // 1단계: AI 기획 (텍스트)
+      // 0단계 + 1단계 병렬: 대표 이미지 + 텍스트 기획 동시 시작
       // ═══════════════════════════════════════
-      prodLog('🤖 AI 상세페이지 기획 생성 중...');
 
-      const sizesText = sizes.map(s =>
-        `${s.label}: ${s.width}×${s.height}mm — ${s.price.toLocaleString()}원`
-      ).join('\n');
+      // 대표 이미지 프롬프트 (새 프롬프트 적용)
+      const heroPromptText = hasSamples
+        ? `References: Single reference image only.
+Use the attached product image as the single and only reference.
+This reference defines the subject identity.
+Do not redesign, stylize, or improve the subject.
+Assume this is a real object photographed for a professional e-commerce listing.
 
+The product is a 3D printed terrain relief model (${sizeInfo}) in a black wooden frame.
+The second image is the digital map/terrain that this model represents.
+
+Goal: Generate a single realistic product photo showing this exact 3D terrain model frame.
+Prioritize clarity, truthfulness, and commercial plausibility.
+Text policy: do not invent, alter, or add any text.
+Reference lock: Strong. Preserve exact identity, proportions, and key design cues. Allow only viewpoint changes.
+Staging style: match the reference image style — mirror backdrop tone, surface type, lighting softness, shadow direction. Keep minimal and commercial. Do not introduce new props or scenery.
+
+Output: One clean product photo — front-facing full view, professional e-commerce style, on a clean surface or held by hand. No text overlay.`
+
+        : `Create a photorealistic product photo of a 3D printed terrain model (${sizeInfo}) inside a black wooden frame.
+The terrain should match the captured map showing landscape, roads, buildings, water, and green areas in raised 3D relief.
+Professional e-commerce product photography on clean background. No text or watermarks.`;
+
+      // 텍스트 기획 프롬프트
       const planPrompt = `너는 한국 이커머스 상세페이지 전문 기획자야.
 아래 상품의 스마트스토어 상세페이지를 7개 섹션으로 기획해줘.
 
 ## 상품 정보
 - 상품명: ${prodName}
 - 지역: ${prodRegion}
-- 설명: ${prodDesc || '실제 위성 지형 데이터를 기반으로 3D 프린팅한 세상에 하나뿐인 지형 모형 액자입니다. 벽에 걸거나 책상에 놓을 수 있으며, 인테리어 소품으로 완벽합니다.'}
+- 사이즈: ${sizeInfo}
+- 설명: ${prodDesc || '실제 위성 지형 데이터를 기반으로 3D 프린팅한 세상에 하나뿐인 지형 모형 액자입니다.'}
 - 사이즈/가격:
-${sizesText || 'S: 150×100mm — 59,000원\nM: 250×150mm — 90,000원\nL: 400×250mm — 150,000원'}
+${sizesText || '기본: 250×174mm — 90,000원'}
 
 ## 핵심 셀링 포인트
-- 이 제품은 세상에 없던 완전히 새로운 카테고리의 상품이다
-- 실제 위성 지형 데이터를 기반으로 한 정밀 3D 프린팅
-- 건물, 도로, 공원, 물길이 모두 입체적으로 표현됨
-- 내가 사는 동네, 추억의 장소, 좋아하는 도시를 입체적으로 소장
-- 선물용으로 완벽 (집들이, 기념일, 졸업, 전역, 프로포즈 등)
-- 액자 프레임 포함, 벽걸이 & 탁상 거치 모두 가능
+- 세상에 없던 완전히 새로운 카테고리의 상품
+- 실제 위성 지형 데이터 기반 정밀 3D 프린팅
+- 건물, 도로, 공원, 물길이 모두 입체적으로 표현
+- 내가 사는 동네, 추억의 장소를 입체적으로 소장
+- 선물용으로 완벽 (집들이, 기념일, 졸업 등)
+- 액자 프레임 포함, 벽걸이 & 탁상 거치 가능
 - 주문 제작 (3일 이내 배송)
 
 ## FAQ 작성 시 주의
-- "액자 프레임 색상 변경 가능한가요?" 질문은 포함하지 마세요
-- "원하는 지역은 어떻게 지정하나요?" 질문은 포함하지 마세요
-- 제작 기간은 "3일 이내"로 안내하세요
+- "액자 프레임 색상 변경 가능한가요?" 포함 금지
+- "원하는 지역은 어떻게 지정하나요?" 포함 금지
+- 제작 기간은 "3일 이내"로 안내
 
 ## 섹션 구조 (7개)
-1. hook — 후킹 (감성적 첫인상, "당신의 도시를 손에 넣다")
-2. product — 제품 상세 설명 (3D 프린팅 공정, 소재)
-3. sizes — 사이즈별 비교 & 가격
-4. lifestyle — 실제 활용 사례 (인테리어, 선물)
-5. process — 주문→제작→배송 과정 안내
-6. uniqueness — 차별점 & 왜 세상에 없는 제품인지
-7. trust — 배송/AS/주문제작 안내, 신뢰도
+1. hook — 후킹 감성 첫인상
+2. product — 제품 상세 (3D 프린팅 공정, 소재)
+3. sizes — 사이즈 비교 & 가격
+4. lifestyle — 활용 사례 (인테리어, 선물)
+5. process — 주문→제작→배송 과정
+6. uniqueness — 차별점
+7. trust — 배송/AS/신뢰도
 
-각 섹션별로 아래 JSON 형태로 기획해줘:
+JSON 형태로:
 {
   "sections": [
     {
       "order": 1,
       "logicType": "hook",
       "title": "섹션 제목",
-      "keyMessage": "메인 카피 (한글, 2줄 이내, 감성적이고 강렬하게)",
-      "subMessage": "보조 카피 (한글)",
-      "visualPrompt": "English prompt for generating a 9:16 vertical product image. The product is a 3D printed terrain model in a black wooden frame showing actual terrain with raised buildings, roads, parks, and water. Must look like a real photograph of the physical product. NO TEXT on image."
+      "keyMessage": "메인 카피",
+      "subMessage": "보조 카피",
+      "visualPrompt": "English prompt for 9:16 vertical product image"
     }
   ],
   "productCopy": {
-    "catchphrase": "짧은 캐치프레이즈",
-    "headline": "메인 헤드라인",
-    "description": "상세 설명 (200자 이상, 감성적이면서 제품 특징 강조)",
+    "catchphrase": "캐치프레이즈",
+    "headline": "헤드라인",
+    "description": "상세 설명 200자 이상",
     "specs": [{"label": "소재", "value": "PLA 친환경 소재 + 원목 프레임"}, ...],
     "faq": [{"question": "질문", "answer": "답변"}, ...]
   }
 }
-
 JSON만 출력해.`;
 
-      const planText = await callAPIYI(apiKey, planPrompt);
-      updateAIProgress(25, '기획 완료, 섹션 이미지 생성 시작...');
+      // ── 병렬 실행 ──
+      prodLog('🚀 대표 이미지 + 텍스트 기획 동시 시작...');
+      updateAIProgress(5, '대표 이미지 + 텍스트 기획 병렬 생성 중...');
 
-      // JSON 파싱
+      const refImages = [];
+      if (hasSamples) refImages.push(state.sampleImages[0]);
+      if (hasCapture) refImages.push(state.capturedImage);
+
+      const [heroResult, planText] = await Promise.all([
+        // 대표 이미지 (generateHero가 false면 null)
+        generateHero
+          ? chrome.runtime.sendMessage({
+              action: 'apiyi_image',
+              prompt: heroPromptText,
+              apiKey, referenceImages: refImages, aspectRatio: '3:4'
+            }).catch(e => ({ success: false, error: e.message }))
+          : Promise.resolve(null),
+        // 텍스트 기획
+        callAPIYI(apiKey, planPrompt)
+      ]);
+
+      // 대표 이미지 결과 처리
+      let heroImage = null;
+      if (heroResult && heroResult.success) {
+        heroImage = heroResult.imageData;
+        prodLog('✅ 대표 이미지 생성 완료!', 'ok');
+      } else if (heroResult) {
+        prodLog(`⚠️ 대표 이미지 실패: ${heroResult.error}`);
+      }
+
+      // 텍스트 기획 결과 처리
+      updateAIProgress(35, '기획 완료, 섹션 이미지 생성 중...');
       let planData;
       try {
         let clean = planText.trim();
@@ -778,119 +793,87 @@ JSON만 출력해.`;
         else throw new Error('JSON not found');
       } catch (e) {
         prodLog(`❌ 기획 파싱 실패: ${e.message}`, 'err');
-        return;
+        _aiGenerating = false; return;
       }
 
       state.aiSections = planData.sections || [];
       state.aiCopy = planData.productCopy || null;
       prodLog(`✅ ${state.aiSections.length}개 섹션 기획 완료`);
 
-      // 대표 이미지가 있으면 첫 번째 섹션에 삽입
+      // 대표 이미지 → 섹션 1 적용
       if (heroImage && state.aiSections.length > 0) {
-        // Cloudinary에 업로드
         try {
           const uploadResp = await chrome.runtime.sendMessage({
-            action: 'cloudinary_upload',
-            base64: heroImage,
-            folder: 'map2model-products'
+            action: 'cloudinary_upload', base64: heroImage, folder: 'map2model-products'
           });
           state.aiSections[0].imageUrl = uploadResp.success ? uploadResp.url : heroImage;
-        } catch (e) {
-          state.aiSections[0].imageUrl = heroImage;
-        }
+        } catch (e) { state.aiSections[0].imageUrl = heroImage; }
         prodLog('✅ 대표 이미지 → 섹션 1 적용');
       }
 
       // ═══════════════════════════════════════
-      // 2단계: 나머지 섹션 이미지 (제한 적용)
+      // 2단계: 나머지 체크된 섹션 이미지 생성
       // ═══════════════════════════════════════
-      const remainingLimit = Math.max(0, sectionLimit - (heroImage ? 1 : 0));
-
       const sectionsToGenerate = state.aiSections
-        .filter((sec, idx) =>
-        !(idx === 0 && heroImage)
-        )
-        .slice(0, remainingLimit);
+        .filter((sec, idx) => checkedSections.includes(idx) && !(idx === 0 && heroImage))
+        .map(sec => sec);
 
-      if (sectionsToGenerate.length === 0 && !heroImage) {
-        prodLog('⏭️ 이미지 생성 스킵 (텍스트 기획만 완료)');
-        updateAIProgress(100, '완료! (텍스트만)');
-      } else {
+      if (sectionsToGenerate.length > 0) {
         prodLog(`🎨 ${sectionsToGenerate.length}개 섹션 이미지 생성 시작...`);
-        const total = sectionsToGenerate.length;
         let done = 0;
+        const total = sectionsToGenerate.length;
 
         async function generateSectionImage(section) {
-          // 참조 이미지: 실물 샘플 + 캡처 맵
-          const refImages = [];
-          if (hasSamples) refImages.push(state.sampleImages[0]);
-          // 대표 이미지가 있으면 스타일 참조로 추가
-          if (heroImage) refImages.push(heroImage);
-          else if (hasCapture) refImages.push(state.capturedImage);
+          const sectionRefImages = [];
+          if (hasSamples) sectionRefImages.push(state.sampleImages[0]);
+          if (heroImage) sectionRefImages.push(heroImage);
+          else if (hasCapture) sectionRefImages.push(state.capturedImage);
 
-          const fullPrompt = `Create a professional e-commerce product detail image for a Korean online store.
-
-IMPORTANT CONTEXT: The product is a 3D printed terrain model in a black wooden frame. Real satellite terrain data is used to create a physical model showing buildings, roads, parks, and water features in raised 3D relief.
-
-${hasSamples ? 'The FIRST reference image shows what the actual finished product looks like - a real photograph of the 3D terrain model. Match this style exactly.' : ''}
-${hasCapture ? `The ${hasSamples ? 'SECOND' : 'FIRST'} reference image is the map that was used to create this terrain model.` : ''}
+          const fullPrompt = `References: Use the attached reference image(s) as the product identity.
+Do not redesign or improve the subject.
+This is a real 3D printed terrain model (${sizeInfo}) in a black wooden frame.
 
 ${section.visualPrompt}
 
-STRICT RULES:
-- NO text, titles, watermarks, Korean or English characters on the image
-- NO text overlay boxes or banners
-- Show the physical 3D printed terrain model product
-- Photorealistic product photography style
-- Warm, inviting lighting
-- Target: Korean premium interior/gift market`;
+Staging style: match the reference — minimal commercial backdrop, consistent lighting.
+Text policy: No text, titles, watermarks, or characters on the image.
+Output: One single 9:16 vertical image. Photorealistic product photography.
+Strict: No fantasy elements. No added accessories. Must look like the same product photographed in the same session.`;
 
           try {
             const resp = await chrome.runtime.sendMessage({
               action: 'apiyi_image',
               prompt: fullPrompt,
-              apiKey: apiKey,
-              referenceImages: refImages.slice(0, 2),
-              aspectRatio: '9:16'
+              apiKey, referenceImages: sectionRefImages.slice(0, 2), aspectRatio: '9:16'
             });
-
-            if (total > 0) {
-              done++;
-              updateAIProgress(25 + Math.round((done / total) * 65), `이미지 ${done}/${total} 생성 완료`);
-            }
+            done++;
+            updateAIProgress(35 + Math.round((done / total) * 55), `이미지 ${done}/${total} 완료`);
 
             if (resp.success) {
               try {
                 const uploadResp = await chrome.runtime.sendMessage({
-                  action: 'cloudinary_upload',
-                  base64: resp.imageData,
-                  folder: 'map2model-products'
+                  action: 'cloudinary_upload', base64: resp.imageData, folder: 'map2model-products'
                 });
                 section.imageUrl = uploadResp.success ? uploadResp.url : resp.imageData;
-              } catch (e) {
-                section.imageUrl = resp.imageData;
-              }
+              } catch (e) { section.imageUrl = resp.imageData; }
               prodLog(`  ✅ ${section.logicType} 이미지 OK`);
             } else {
               prodLog(`  ❌ ${section.logicType} 실패: ${resp.error}`, 'err');
-              section.imageUrl = null;
             }
           } catch (e) {
-            if (total > 0) done++;
+            done++;
             prodLog(`  ❌ ${section.logicType} 오류: ${e.message}`, 'err');
-            section.imageUrl = null;
           }
         }
 
-        const imageTasks = sectionsToGenerate.map(section => () => generateSectionImage(section));
+        const imageTasks = sectionsToGenerate.map(s => () => generateSectionImage(s));
         await parallelLimit(imageTasks, 2);
-        updateAIProgress(100, '완료!');
       }
 
+      updateAIProgress(100, '완료!');
       const successCount = state.aiSections.filter(s => s.imageUrl).length;
       prodLog(`✅ AI 생성 완료! (${successCount}/${state.aiSections.length}개 이미지)`, 'ok');
 
-      // 결과 표시
       renderAISections();
       $('ai-gen-progress').style.display = 'none';
       $('ai-gen-result').style.display = 'block';
@@ -975,120 +958,117 @@ STRICT RULES:
     $('preview-area').innerHTML = html;
   }
 
+  function buildDetailHtml() {
+    const imageUrls = state.aiSections
+      .filter(s => s.imageUrl)
+      .map(s => s.imageUrl);
+    let html = '<div style="max-width:860px;margin:0 auto;text-align:center;">';
+    imageUrls.forEach(url => {
+      html += `<img src="${url}" style="width:100%;max-width:860px;display:block;margin:0 auto;">`;
+    });
+    if (state.aiCopy?.specs) {
+      html += '<table style="width:100%;max-width:860px;margin:20px auto;border-collapse:collapse;">';
+      state.aiCopy.specs.forEach((s, i) => {
+        html += `<tr style="background:${i % 2 === 0 ? '#f8f9fa' : '#fff'}">
+          <td style="padding:12px;border:1px solid #dee2e6;font-weight:bold">${s.label}</td>
+          <td style="padding:12px;border:1px solid #dee2e6">${s.value}</td></tr>`;
+      });
+      html += '</table>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function saveHistory(item) {
+    saveToHistory(item);
+  }
+
   // ========== 스마트스토어 업로드 ==========
   async function doUpload() {
-    const naverId = getSetting('naver_client_id');
-    const naverSecret = getSetting('naver_client_secret');
-
-    if (!naverId || !naverSecret) {
-      prodLog('❌ 설정에서 네이버 커머스 API 정보를 입력하세요', 'err');
-      $('upload-msg').textContent = '❌ 네이버 API 설정 필요';
-      return;
-    }
-
-    $('upload-done').style.display = 'none';
-    $('upload-msg').textContent = '🔐 네이버 인증 토큰 발급 중...';
-    $('upload-bar').style.width = '10%';
-    prodLog('🔐 네이버 토큰 발급 시도...');
-
+    prodLog('🚀 스마트스토어 업로드 시작...');
     try {
-      // SmartStore API 호출은 smartstore.js의 SmartStoreAPI 사용
-      if (typeof SmartStoreAPI === 'undefined') {
-        throw new Error('SmartStore API 모듈 로드 실패');
+      const stored = await chrome.storage.local.get([
+        'naver_client_id', 'naver_client_secret', 'category_id', 'return_info',
+        'outbound_code', 'return_address_id', 'delivery_company', 'seller_phone'
+      ]);
+
+      if (!stored.naver_client_id || !stored.naver_client_secret) {
+        prodLog('❌ 설정에서 네이버 API 키를 입력하세요', 'err'); return;
       }
 
-      const api = new SmartStoreAPI(naverId, naverSecret);
-
-      // 1. 토큰 발급
-      $('upload-msg').textContent = '🔐 인증 중...';
-      $('upload-bar').style.width = '20%';
+      const api = new SmartStoreAPI(stored.naver_client_id, stored.naver_client_secret);
+      prodLog('🔐 네이버 토큰 발급 시도...');
       await api.authenticate();
       prodLog('✅ 네이버 인증 성공');
 
-      // 2. 이미지 업로드
-      $('upload-msg').textContent = '📸 이미지 업로드 중...';
-      $('upload-bar').style.width = '40%';
-
-      const imageUrls = [];
-      for (const sec of state.aiSections) {
-        if (sec.imageUrl && sec.imageUrl.startsWith('http')) {
-          imageUrls.push(sec.imageUrl);
-        }
-      }
-      for (const img of state.extraImages) {
-        // Cloudinary에 업로드
-        try {
-          const uploadResp = await chrome.runtime.sendMessage({
-            action: 'cloudinary_upload', base64: img, folder: 'map2model-extra'
-          });
-          if (uploadResp.success) imageUrls.push(uploadResp.url);
-        } catch (e) { /* skip */ }
-      }
-
-      prodLog(`✅ ${imageUrls.length}개 이미지 준비 완료`);
-
-      // 3. 상품 등록
-      $('upload-msg').textContent = '📝 상품 등록 중...';
-      $('upload-bar').style.width = '70%';
-
-      const sizes = getSizes();
-      const prodName = $('prod-name').value.trim() || '3D 지형 모형 액자';
-      const prodDesc = state.aiCopy?.description || $('prod-desc').value.trim() || '';
-
-      // 상세 HTML 생성
-      let detailHtml = '<div style="max-width:860px;margin:0 auto;text-align:center;">';
-      imageUrls.forEach(url => {
-        detailHtml += `<img src="${url}" style="width:100%;max-width:860px;display:block;margin:0 auto;">`;
+      // 이미지 URL 수집 (Cloudinary URL)
+      const imageUrls = state.aiSections
+        .filter(s => s.imageUrl && s.imageUrl.startsWith('http'))
+        .map(s => s.imageUrl);
+      state.extraImages.forEach(img => {
+        if (img.startsWith('http')) imageUrls.push(img);
       });
-      if (state.aiCopy?.specs) {
-        detailHtml += '<table style="width:100%;max-width:860px;margin:20px auto;border-collapse:collapse;">';
-        state.aiCopy.specs.forEach((s, i) => {
-          detailHtml += `<tr style="background:${i%2===0?'#f8f9fa':'#fff'}">
-            <td style="padding:12px;border:1px solid #dee2e6;font-weight:bold">${s.label}</td>
-            <td style="padding:12px;border:1px solid #dee2e6">${s.value}</td></tr>`;
-        });
-        detailHtml += '</table>';
-      }
-      detailHtml += '</div>';
+
+      // 네이버 이미지 호스팅 업로드
+      prodLog(`📸 ${imageUrls.length}개 이미지 네이버 업로드 중...`);
+      $('upload-bar').style.width = '20%';
+      const naverImages = await api.uploadImages(imageUrls);
+      prodLog(`✅ ${naverImages.length}개 이미지 준비 완료`);
+      $('upload-bar').style.width = '50%';
+
+      // 상품 데이터 구성
+      const prodName = $('prod-name').value.trim() || '3D 지형 모형 액자';
+      const prodDesc = $('prod-desc').value.trim();
+      const sizes = getSizes();
+      const detailHtml = buildDetailHtml();
 
       const productData = api.buildProductData({
         name: prodName,
         description: prodDesc,
         detailHtml: detailHtml,
-        images: imageUrls,
+        images: naverImages,
         sizes: sizes,
-        categoryId: $('set-category-id')?.value?.trim() || '50000803',
-        returnInfo: $('set-return-info')?.value?.trim() || '주문 제작 상품으로 단순 변심에 의한 반품이 어렵습니다.'
+        categoryId: stored.category_id || '50000803',
+        returnInfo: stored.return_info,
+        settings: {
+          outboundShippingPlaceCode: parseInt(stored.outbound_code, 10) || 100797935,
+          returnAddressId: parseInt(stored.return_address_id, 10) || 100797936,
+          shippingAddressId: parseInt(stored.outbound_code, 10) || 100797935,
+          sellerPhone: stored.seller_phone || '010-7253-0101',
+          deliveryCompany: stored.delivery_company || 'CJGLS'
+        }
       });
 
+      // 디버깅: 전송 데이터 로그
+      console.log('[SmartStore] 전송 payload:', JSON.stringify(productData, null, 2));
+
+      prodLog('📦 상품 등록 중...');
+      $('upload-bar').style.width = '80%';
       const result = await api.createProduct(productData);
 
       $('upload-bar').style.width = '100%';
-      $('upload-msg').textContent = '✅ 완료!';
-      $('upload-done').style.display = 'block';
+      prodLog(`✅ 상품 등록 성공! productNo: ${result.originProductNo}`, 'ok');
 
-      if (result.smartstoreChannelProductNo) {
-        const url = `https://smartstore.naver.com/products/${result.smartstoreChannelProductNo}`;
-        $('product-url').href = url;
-        prodLog(`🎉 상품 등록 완료! ${url}`, 'ok');
-      } else {
-        $('product-url').href = '#';
-        $('product-url').textContent = '등록 완료 (URL 확인 필요)';
-        prodLog('✅ 상품 등록 완료!', 'ok');
-      }
+      // 성공 UI
+      $('upload-status').style.display = 'none';
+      $('upload-done').style.display = 'block';
+      const productUrl = `https://smartstore.naver.com/mumuriri/products/${result.smartstoreChannelProductNo || result.originProductNo}`;
+      $('product-url').href = productUrl;
+      $('product-url').textContent = `스마트스토어에서 보기 → ${productUrl}`;
 
       // 히스토리 저장
-      saveToHistory({
+      saveHistory({
         name: prodName,
-        region: $('prod-region').value,
-        thumbnail: imageUrls[0] || '',
+        region: $('prod-region').value.trim(),
+        productNo: result.originProductNo,
+        url: productUrl,
         date: new Date().toISOString(),
-        sizes: sizes
+        images: naverImages.length
       });
 
     } catch (e) {
-      $('upload-msg').textContent = `❌ 실패: ${e.message}`;
       prodLog(`❌ 업로드 실패: ${e.message}`, 'err');
+      $('upload-msg').textContent = `실패: ${e.message}`;
     }
   }
 
@@ -1215,7 +1195,11 @@ STRICT RULES:
         naver_client_id: $('set-naver-id').value.trim(),
         naver_client_secret: $('set-naver-secret').value.trim(),
         category_id: $('set-category-id').value.trim(),
-        return_info: $('set-return-info').value.trim()
+        return_info: $('set-return-info').value.trim(),
+        outbound_code: $('set-outbound-code').value.trim(),
+        return_address_id: $('set-return-address-id').value.trim(),
+        delivery_company: $('set-delivery-company').value,
+        seller_phone: $('set-seller-phone').value.trim()
       });
       // localStorage에도 APIYI 키 저장 (panel.js 호환)
       localStorage.setItem('nanoBananaApiKey', $('set-apiyi').value.trim());
