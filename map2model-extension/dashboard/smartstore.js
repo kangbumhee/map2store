@@ -97,7 +97,10 @@ class SmartStoreAPI {
 
   // ── 상품 데이터 구성 (oliveyoung-smart-store 검증 구조) ──
   buildProductData({ name, description, detailHtml, images, sizes, categoryId, returnInfo, settings, tags }) {
-    const sellerTags = (tags || []).slice(0, 10).map(t => ({ code: 0, text: t }));
+    const sellerTags = (tags || [])
+      .filter(t => t && t.length >= 2 && t !== '함께 많이 찾는')
+      .slice(0, 10)
+      .map(t => ({ code: 0, text: t }));
 
     // 설정값 (대시보드 설정에서 가져옴)
     const outboundCode = settings?.outboundShippingPlaceCode || 100797935;

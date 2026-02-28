@@ -565,7 +565,7 @@
 
       // 상품명에 사이즈 반영
       const currentName = $('prod-name').value;
-      if (currentName && !currentName.includes(`${mmW}×${mmH}mm`)) {
+      if (currentName) {
         const cleaned = currentName.replace(/\s*\(\d+×\d+mm\)/, '');
         $('prod-name').value = `${cleaned} (${mmW}×${mmH}mm)`;
       }
@@ -716,6 +716,8 @@
       // 사이즈 텍스트
       const sizesText = sizes.map(s => `${s.label}: ${s.width}×${s.height}mm — ${s.price.toLocaleString()}원`).join('\n');
       const sizeInfo = sizes.length > 0 ? `${sizes[0].width}×${sizes[0].height}mm` : '250×174mm';
+      const naverKeywords = await fetchNaverKeywords(prodRegion);
+      prodLog(`🔍 네이버 연관키워드 ${naverKeywords.length}개 수집`);
 
       // ═══════════════════════════════════════
       // 0단계 + 1단계 병렬: 대표 이미지 + 텍스트 기획 동시 시작
@@ -796,9 +798,10 @@ JSON 형태로:
 }
 태그 규칙:
 - 최대 10개
-- 지역명 관련 검색 키워드 포함 (예: "인천 차이나타운 맛집", "인천 차이나타운 먹거리")
-- 상품 관련 키워드 포함 (예: "3D 지형 모형", "인테리어 소품", "특별한 선물")
-- 네이버에서 사람들이 많이 검색하는 연관 키워드 위주
+- 아래 네이버 연관 키워드를 우선 포함: ${naverKeywords.slice(0, 5).join(', ')}
+- 지역명 + 관광/맛집/볼거리/선물 조합
+- 상품 관련: 3D 지형 모형, 인테리어 액자, 특별한 선물 등
+- 한글만, 각 태그 10자 이내 권장
 JSON만 출력해.`;
 
       // ── 병렬 실행 ──
@@ -848,9 +851,13 @@ JSON만 출력해.`;
 
       state.aiSections = planData.sections || [];
       state.aiCopy = planData.productCopy || null;
-      state.aiTags = planData.tags || [];
+      state.aiTags = [
+        ...naverKeywords.slice(0, 5),
+        ...(planData.tags || [])
+      ].filter(t => t && t.length >= 2 && t !== '함께 많이 찾는');
+      state.aiTags = [...new Set(state.aiTags)].slice(0, 10);
       prodLog(`✅ ${state.aiSections.length}개 섹션 기획 완료`);
-      prodLog(`🏷️ AI 태그 ${state.aiTags.length}개 생성`);
+      prodLog(`🏷️ 상품 태그 ${state.aiTags.length}개: ${state.aiTags.join(', ')}`);
 
       // 대표 이미지 → 섹션 1 적용
       if (heroImage && state.aiSections.length > 0) {
@@ -979,7 +986,7 @@ IMPORTANT RULES:
       if (sec.imageUrl) {
         html += `<img src="${sec.imageUrl}" style="width:100%;display:block" alt="섹션${i+1}">`;
       }
-      html += `<div style="padding:32px 24px;background:${i % 2 === 0 ? '#1e293b' : '#0f172a'};text-align:center">
+      html += `<div style="padding:40px 24px;background:${i % 2 === 0 ? '#1e293b' : '#0f172a'};text-align:center">
         <h3 style="font-size:48px;font-weight:700;margin-bottom:16px;color:#e2e8f0">${sec.title || ''}</h3>
         <p style="font-size:36px;font-weight:600;color:#3b82f6;margin-bottom:12px;line-height:1.5">${sec.keyMessage || ''}</p>
         ${sec.subMessage ? `<p style="font-size:28px;color:#94a3b8;line-height:1.6">${sec.subMessage}</p>` : ''}
@@ -994,7 +1001,7 @@ IMPORTANT RULES:
     // 스펙 테이블
     if (state.aiCopy?.specs) {
       html += `<div style="padding:20px;background:#1e293b">
-        <h3 style="text-align:center;margin-bottom:12px">제품 상세 스펙</h3>
+        <h3 style="text-align:center;margin-bottom:12px;font-size:48px;font-weight:700">제품 상세 스펙</h3>
         <table style="width:100%;border-collapse:collapse">`;
       state.aiCopy.specs.forEach((spec, i) => {
         html += `<tr style="background:${i % 2 === 0 ? '#334155' : '#1e293b'}">
@@ -1007,7 +1014,7 @@ IMPORTANT RULES:
     // FAQ
     if (state.aiCopy?.faq) {
       html += `<div style="padding:20px;background:#0f172a">
-        <h3 style="text-align:center;margin-bottom:12px">자주 묻는 질문</h3>`;
+        <h3 style="text-align:center;margin-bottom:12px;font-size:48px;font-weight:700">자주 묻는 질문</h3>`;
       state.aiCopy.faq.forEach(item => {
         html += `<div style="padding:12px;margin-bottom:8px;background:#1e293b;border-radius:8px">
           <p style="font-weight:700;color:#3b82f6;font-size:28px">Q. ${item.question}</p>
@@ -1352,6 +1359,29 @@ IMPORTANT RULES:
     });
     if (!resp.success) throw new Error(resp.error);
     return resp.text;
+  }
+
+  // ========== 네이버 연관검색어 수집 ==========
+  async function fetchNaverKeywords(regionName) {
+    const keywords = [];
+    const parts = regionName.split(/[\/,+&]/).map(s => s.trim()).filter(Boolean);
+
+    for (const part of parts) {
+      try {
+        const url = `https://search.naver.com/search.naver?where=nexearch&query=${encodeURIComponent(part)}`;
+        const resp = await fetch(url);
+        const html = await resp.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        doc.querySelectorAll('.related_srch .tit').forEach(el => {
+          const t = el.textContent.trim();
+          if (t && t.length >= 3) keywords.push(t);
+        });
+      } catch (e) {
+        console.log(`[키워드] ${part} 수집 실패:`, e.message);
+      }
+    }
+    return [...new Set(keywords)];
   }
 
   // ========== 유틸리티 ==========
