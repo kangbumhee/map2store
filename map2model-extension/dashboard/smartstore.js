@@ -100,7 +100,7 @@ class SmartStoreAPI {
     const sellerTags = (tags || [])
       .filter(t => t && t.length >= 2 && t !== '함께 많이 찾는')
       .slice(0, 10)
-      .map(t => ({ code: 0, text: t }));
+      .map(t => ({ text: t }));
 
     // 설정값 (대시보드 설정에서 가져옴)
     const outboundCode = settings?.outboundShippingPlaceCode || 100797935;
@@ -231,7 +231,12 @@ class SmartStoreAPI {
   // ── 이미지 업로드 (URL → 네이버 호스팅) ──
   async uploadImages(imageUrls) {
     const uploaded = [];
-    for (const url of imageUrls.slice(0, 10)) {
+    for (let idx = 0; idx < Math.min(imageUrls.length, 10); idx++) {
+      const url = imageUrls[idx];
+      // 429 방지: 두 번째 이미지부터 500ms 딜레이
+      if (idx > 0) {
+        await new Promise(r => setTimeout(r, 500));
+      }
       try {
         // 이미지 다운로드
         const resp = await fetch(url);

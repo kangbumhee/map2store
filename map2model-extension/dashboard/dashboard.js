@@ -469,13 +469,16 @@
     $('ai-section-limit').dispatchEvent(new Event('input'));
 
     // Step 4: 미리보기
-    $('preview-confirm').addEventListener('click', () => setStep(5));
+    $('preview-confirm').addEventListener('click', () => {
+      setStep(5, false);
+      doUpload();
+    });
 
     // 원클릭
     $('prod-auto-btn').addEventListener('click', doFullAuto);
   }
 
-  function setStep(n) {
+  function setStep(n, autoRun = true) {
     state.currentStep = n;
     // 파이프라인 업데이트
     document.querySelectorAll('.pipe-step').forEach(el => {
@@ -489,8 +492,8 @@
       $(`step${i}-card`).style.display = i === n ? 'block' : 'none';
     }
     // 스텝 시작 동작
-    if (n === 3 && !_aiGenerating) doAIGenerate();
-    if (n === 5) doUpload();
+    if (autoRun && n === 3 && !_aiGenerating) doAIGenerate();
+    // Step 5 자동 doUpload 제거 — 명시적 호출만 허용
   }
 
   async function doCapture() {
@@ -800,7 +803,9 @@ JSON 형태로:
 - 최대 10개
 - 아래 네이버 연관 키워드를 우선 포함: ${naverKeywords.slice(0, 5).join(', ')}
 - 지역명 + 관광/맛집/볼거리/선물 조합
-- 상품 관련: 3D 지형 모형, 인테리어 액자, 특별한 선물 등
+- 상품 관련: 3D지형모형, 인테리어액자, 지형모형액자 등 (띄어쓰기 없이)
+- 반드시 네이버에서 검색 가능한 키워드만 사용
+- "특별한 선물", "특별한선물" 등 일반적 형용사+명사 조합 금지
 - 한글만, 각 태그 10자 이내 권장
 JSON만 출력해.`;
 
@@ -851,10 +856,11 @@ JSON만 출력해.`;
 
       state.aiSections = planData.sections || [];
       state.aiCopy = planData.productCopy || null;
+      const bannedTags = ['함께 많이 찾는', '특별한 선물', '특별한선물'];
       state.aiTags = [
         ...naverKeywords.slice(0, 5),
         ...(planData.tags || [])
-      ].filter(t => t && t.length >= 2 && t !== '함께 많이 찾는');
+      ].filter(t => t && t.length >= 2 && !bannedTags.includes(t));
       state.aiTags = [...new Set(state.aiTags)].slice(0, 10);
       prodLog(`✅ ${state.aiSections.length}개 섹션 기획 완료`);
       prodLog(`🏷️ 상품 태그 ${state.aiTags.length}개: ${state.aiTags.join(', ')}`);
@@ -1027,22 +1033,52 @@ IMPORTANT RULES:
   }
 
   function buildDetailHtml() {
-    const imageUrls = state.aiSections
-      .filter(s => s.imageUrl)
-      .map(s => s.imageUrl);
     let html = '<div style="max-width:860px;margin:0 auto;text-align:center;">';
-    imageUrls.forEach(url => {
-      html += `<img src="${url}" style="width:100%;max-width:860px;display:block;margin:0 auto;">`;
+
+    // ── 각 섹션: 텍스트 + 이미지 교차 배치 ──
+    state.aiSections.forEach(sec => {
+      if (sec.title || sec.keyMessage || sec.subMessage) {
+        html += '<div style="padding:40px 20px 20px;text-align:center;">';
+        if (sec.title) {
+          html += `<h3 style="font-size:36px;font-weight:700;color:#1a1a1a;margin:0 0 12px;line-height:1.4;">${sec.title}</h3>`;
+        }
+        if (sec.keyMessage) {
+          html += `<p style="font-size:28px;color:#333;margin:0 0 8px;line-height:1.6;">${sec.keyMessage}</p>`;
+        }
+        if (sec.subMessage) {
+          html += `<p style="font-size:24px;color:#666;margin:0;line-height:1.5;">${sec.subMessage}</p>`;
+        }
+        html += '</div>';
+      }
+      if (sec.imageUrl) {
+        html += `<img src="${sec.imageUrl}" style="width:100%;max-width:860px;display:block;margin:0 auto;" alt="${sec.title || ''}">`;
+      }
     });
+
+    // ── 제품 상세 스펙 테이블 (font-size 4배 = 28px) ──
     if (state.aiCopy?.specs) {
-      html += '<table style="width:100%;max-width:860px;margin:20px auto;border-collapse:collapse;">';
+      html += '<div style="padding:40px 20px 10px;"><h3 style="font-size:36px;font-weight:700;color:#1a1a1a;margin:0 0 16px;">제품 상세 스펙</h3></div>';
+      html += '<table style="width:100%;max-width:860px;margin:0 auto 20px;border-collapse:collapse;">';
       state.aiCopy.specs.forEach((s, i) => {
         html += `<tr style="background:${i % 2 === 0 ? '#f8f9fa' : '#fff'}">
-          <td style="padding:12px;border:1px solid #dee2e6;font-weight:bold">${s.label}</td>
-          <td style="padding:12px;border:1px solid #dee2e6">${s.value}</td></tr>`;
+          <td style="padding:14px;border:1px solid #dee2e6;font-weight:700;font-size:28px;width:35%;">${s.label}</td>
+          <td style="padding:14px;border:1px solid #dee2e6;font-size:28px;">${s.value}</td></tr>`;
       });
       html += '</table>';
     }
+
+    // ── FAQ ──
+    if (state.aiCopy?.faq && state.aiCopy.faq.length > 0) {
+      html += '<div style="padding:30px 20px 10px;"><h3 style="font-size:36px;font-weight:700;color:#1a1a1a;margin:0 0 16px;">자주 묻는 질문</h3></div>';
+      html += '<div style="max-width:860px;margin:0 auto;text-align:left;">';
+      state.aiCopy.faq.forEach(f => {
+        html += `<div style="padding:16px 20px;border-bottom:1px solid #eee;">
+          <p style="font-size:28px;font-weight:700;color:#1a1a1a;margin:0 0 8px;">Q. ${f.question}</p>
+          <p style="font-size:26px;color:#555;margin:0;line-height:1.5;">A. ${f.answer}</p></div>`;
+      });
+      html += '</div>';
+    }
+
     html += '</div>';
     return html;
   }
@@ -1263,8 +1299,8 @@ IMPORTANT RULES:
     }
 
     // Step 5: 업로드
-    setStep(5);
-    // doUpload는 setStep(5)에서 자동 호출됨
+    setStep(5, false);
+    await doUpload();
 
     prodLog('🏁 풀 오토 프로세스 완료!', 'ok');
   }
