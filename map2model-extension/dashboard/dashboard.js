@@ -19,6 +19,7 @@
     extraImages: [],
     aiSections: [],
     aiCopy: null,
+    aiTags: [],
     currentStep: 1,
     history: []
   };
@@ -317,7 +318,8 @@
       sendPolygon(coords, name, autoMesh, true);
       if ($('prod-region-auto')?.checked) {
         $('prod-region').value = name;
-        $('prod-name').value = `${name} 3D 지형 모형 액자`;
+        const defaultSize = '250×174mm';
+        $('prod-name').value = `${name} 3D 지형 모형 액자 (${defaultSize})`;
       }
       return;
     }
@@ -369,7 +371,8 @@
     // 상품 페이지에 지역명 전달 (체크박스가 체크되어 있을 때만)
     if ($('prod-region-auto')?.checked) {
       $('prod-region').value = names;
-      $('prod-name').value = `${names} 3D 지형 모형 액자`;
+      const defaultSize = '250×174mm';
+      $('prod-name').value = `${names} 3D 지형 모형 액자 (${defaultSize})`;
     }
   }
 
@@ -559,6 +562,13 @@
       // 기존 사이즈 목록 초기화 후 자동 입력
       $('size-list').innerHTML = '';
       addSizeRowWithData('기본', mmW, mmH, 90000);
+
+      // 상품명에 사이즈 반영
+      const currentName = $('prod-name').value;
+      if (currentName && !currentName.includes(`${mmW}×${mmH}mm`)) {
+        const cleaned = currentName.replace(/\s*\(\d+×\d+mm\)/, '');
+        $('prod-name').value = `${cleaned} (${mmW}×${mmH}mm)`;
+      }
     };
     img.src = state.capturedImage;
   }
@@ -781,8 +791,14 @@ JSON 형태로:
     "description": "상세 설명 200자 이상",
     "specs": [{"label": "소재", "value": "PLA 친환경 소재"}, ...],
     "faq": [{"question": "질문", "answer": "답변"}, ...]
-  }
+  },
+  "tags": ["네이버 검색용 태그1", "태그2", ...]
 }
+태그 규칙:
+- 최대 10개
+- 지역명 관련 검색 키워드 포함 (예: "인천 차이나타운 맛집", "인천 차이나타운 먹거리")
+- 상품 관련 키워드 포함 (예: "3D 지형 모형", "인테리어 소품", "특별한 선물")
+- 네이버에서 사람들이 많이 검색하는 연관 키워드 위주
 JSON만 출력해.`;
 
       // ── 병렬 실행 ──
@@ -832,7 +848,9 @@ JSON만 출력해.`;
 
       state.aiSections = planData.sections || [];
       state.aiCopy = planData.productCopy || null;
+      state.aiTags = planData.tags || [];
       prodLog(`✅ ${state.aiSections.length}개 섹션 기획 완료`);
+      prodLog(`🏷️ AI 태그 ${state.aiTags.length}개 생성`);
 
       // 대표 이미지 → 섹션 1 적용
       if (heroImage && state.aiSections.length > 0) {
@@ -956,11 +974,16 @@ IMPORTANT RULES:
       <p style="font-size:24px;font-weight:700;color:#3b82f6">${basePrice.toLocaleString()}원~</p>
     </div>`;
 
-    // AI 섹션 이미지
-    state.aiSections.forEach(sec => {
+    // ═══ AI 섹션 (이미지 + 텍스트 설명) ═══
+    state.aiSections.forEach((sec, i) => {
       if (sec.imageUrl) {
-        html += `<img src="${sec.imageUrl}" style="width:100%;display:block">`;
+        html += `<img src="${sec.imageUrl}" style="width:100%;display:block" alt="섹션${i+1}">`;
       }
+      html += `<div style="padding:32px 24px;background:${i % 2 === 0 ? '#1e293b' : '#0f172a'};text-align:center">
+        <h3 style="font-size:48px;font-weight:700;margin-bottom:16px;color:#e2e8f0">${sec.title || ''}</h3>
+        <p style="font-size:36px;font-weight:600;color:#3b82f6;margin-bottom:12px;line-height:1.5">${sec.keyMessage || ''}</p>
+        ${sec.subMessage ? `<p style="font-size:28px;color:#94a3b8;line-height:1.6">${sec.subMessage}</p>` : ''}
+      </div>`;
     });
 
     // 추가 이미지
@@ -975,8 +998,8 @@ IMPORTANT RULES:
         <table style="width:100%;border-collapse:collapse">`;
       state.aiCopy.specs.forEach((spec, i) => {
         html += `<tr style="background:${i % 2 === 0 ? '#334155' : '#1e293b'}">
-          <td style="padding:10px;border:1px solid #475569;font-weight:600;width:35%">${spec.label}</td>
-          <td style="padding:10px;border:1px solid #475569">${spec.value}</td></tr>`;
+          <td style="padding:16px;border:1px solid #475569;font-weight:700;width:35%;font-size:28px;color:#94a3b8">${spec.label}</td>
+          <td style="padding:16px;border:1px solid #475569;font-size:28px;color:#e2e8f0">${spec.value}</td></tr>`;
       });
       html += `</table></div>`;
     }
@@ -987,8 +1010,8 @@ IMPORTANT RULES:
         <h3 style="text-align:center;margin-bottom:12px">자주 묻는 질문</h3>`;
       state.aiCopy.faq.forEach(item => {
         html += `<div style="padding:12px;margin-bottom:8px;background:#1e293b;border-radius:8px">
-          <p style="font-weight:700;color:#3b82f6">Q. ${item.question}</p>
-          <p style="margin-top:6px;color:#94a3b8">A. ${item.answer}</p></div>`;
+          <p style="font-weight:700;color:#3b82f6;font-size:28px">Q. ${item.question}</p>
+          <p style="margin-top:6px;color:#94a3b8;font-size:24px">A. ${item.answer}</p></div>`;
       });
       html += `</div>`;
     }
@@ -1138,6 +1161,7 @@ IMPORTANT RULES:
         sizes: sizes,
         categoryId: stored.category_id || '50000803',
         returnInfo: stored.return_info,
+        tags: state.aiTags || [],
         settings: {
           outboundShippingPlaceCode: parseInt(stored.outbound_code, 10) || 100797935,
           returnAddressId: parseInt(stored.return_address_id, 10) || 100797936,

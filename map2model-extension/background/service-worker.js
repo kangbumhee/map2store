@@ -96,7 +96,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ success: true });
         } else {
           // map2model.com 새 탭 열기
-          const newTab = await chrome.tabs.create({ url: 'https://map2model.com' });
+          const newTab = await chrome.tabs.create({ url: 'https://map2model.com', active: false });
           // 로드 완료 대기
           await waitForTabLoad(newTab.id);
           // content script 주입 + 준비 대기
