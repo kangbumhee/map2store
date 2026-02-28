@@ -65,12 +65,13 @@
 
   // ── 설정 로드/저장 ──
   async function loadSettings() {
-    const keys = ['gimi9_token', 'apiyi_key', 'naver_client_id', 'naver_client_secret',
+    const keys = ['gimi9_token', 'apiyi_key', 'ecco_api_key', 'naver_client_id', 'naver_client_secret',
       'category_id', 'return_info', 'outbound_code', 'return_address_id',
       'delivery_company', 'seller_phone'];
     const stored = await chrome.storage.local.get(keys);
     if (stored.gimi9_token) $('set-gimi9').value = stored.gimi9_token;
     if (stored.apiyi_key) $('set-apiyi').value = stored.apiyi_key;
+    if (stored.ecco_api_key) $('set-eccoapi').value = stored.ecco_api_key;
     if (stored.naver_client_id) $('set-naver-id').value = stored.naver_client_id;
     if (stored.naver_client_secret) $('set-naver-secret').value = stored.naver_client_secret;
     if (stored.category_id) $('set-category-id').value = stored.category_id;
@@ -85,6 +86,7 @@
     const el = {
       'gimi9_token': 'set-gimi9',
       'apiyi_key': 'set-apiyi',
+      'ecco_api_key': 'set-eccoapi',
       'naver_client_id': 'set-naver-id',
       'naver_client_secret': 'set-naver-secret'
     }[key];
@@ -149,6 +151,7 @@
 
     // 시작 버튼
     $('map-start-btn').addEventListener('click', doMapStart);
+    $('map-batch-auto-btn')?.addEventListener('click', runBatchAuto);
   }
 
   function doSearch() {
@@ -220,7 +223,8 @@
     if (state.mapTab === 'preset') {
       if (state.selectedPreset) {
         infoDiv.style.display = 'block';
-        $('map-sel-name').textContent = state.selectedPreset.name;
+        const cleanName = state.selectedPreset.name.replace(/\//g, ' ').replace(/\s+/g, ' ').trim();
+        $('map-sel-name').textContent = cleanName;
         $('map-sel-detail').textContent = state.selectedPreset.desc;
         startBtn.disabled = false;
       } else {
@@ -250,6 +254,7 @@
   function renderPresets() {
     const catSel = $('map-preset-cat');
     const itemSel = $('map-preset-item');
+    const selectAll = $('map-preset-select-all');
 
     state.presets.forEach((cat, i) => {
       const o = document.createElement('option');
@@ -264,6 +269,7 @@
       $('map-preset-desc').style.display = 'none';
       state.selectedPreset = null;
       updateSelInfo();
+      renderPresetChecklist();
       if (idx === '') { itemSel.disabled = true; return; }
       const cat = state.presets[parseInt(idx, 10)];
       cat.items.sort((a, b) => a.name.localeCompare(b.name, 'ko')).forEach((item, i) => {
@@ -271,6 +277,7 @@
         o.value = i; o.textContent = item.name;
         itemSel.appendChild(o);
       });
+      renderPresetChecklist(parseInt(idx, 10));
       itemSel.disabled = false;
       // 카테고리 선택 시 아이템 셀렉트 자동 포커스 + 드롭다운 열기
       setTimeout(() => {
@@ -302,6 +309,57 @@
       updateSelInfo();
       mapLog(`✅ 명소: ${item.name}`);
     });
+
+    if (selectAll) {
+      selectAll.addEventListener('change', () => {
+        document.querySelectorAll('.preset-batch-chk').forEach(chk => {
+          chk.checked = selectAll.checked;
+        });
+      });
+    }
+  }
+
+  function renderPresetChecklist(catIdx) {
+    const wrap = $('map-preset-checklist');
+    const selectAll = $('map-preset-select-all');
+    if (!wrap) return;
+    if (catIdx === undefined || Number.isNaN(catIdx)) {
+      wrap.innerHTML = '';
+      if (selectAll) selectAll.checked = false;
+      return;
+    }
+
+    const items = state.presets[catIdx]?.items || [];
+    wrap.innerHTML = items.map((item, idx) => (
+      `<label class="mini-check" style="display:flex;margin-bottom:4px">
+        <input type="checkbox" class="preset-batch-chk" data-cat="${catIdx}" data-item="${idx}">
+        ${item.name}
+      </label>`
+    )).join('');
+
+    wrap.querySelectorAll('.preset-batch-chk').forEach(chk => {
+      chk.addEventListener('change', () => {
+        const all = wrap.querySelectorAll('.preset-batch-chk');
+        const checked = wrap.querySelectorAll('.preset-batch-chk:checked');
+        if (selectAll) selectAll.checked = all.length > 0 && all.length === checked.length;
+      });
+    });
+    if (selectAll) selectAll.checked = false;
+  }
+
+  function getCheckedPresets() {
+    const checked = Array.from(document.querySelectorAll('.preset-batch-chk:checked'));
+    return checked.map(chk => {
+      const catIdx = parseInt(chk.dataset.cat, 10);
+      const itemIdx = parseInt(chk.dataset.item, 10);
+      const preset = state.presets[catIdx]?.items?.[itemIdx];
+      if (!preset) return null;
+      return {
+        ...preset,
+        _catIdx: catIdx,
+        _itemIdx: itemIdx
+      };
+    }).filter(Boolean);
   }
 
   // ── 맵 생성 시작 ──
@@ -318,9 +376,17 @@
       mapLog(`🚀 전송: ${name}`);
       sendPolygon(coords, name, autoMesh, true);
       if ($('prod-region-auto')?.checked) {
-        $('prod-region').value = name;
+        const presetItemText = $('map-preset-item')?.selectedOptions?.[0]?.textContent?.trim() || '';
+        const cleanPresetName = state.selectedPreset?.name
+          ? state.selectedPreset.name.replace(/\//g, ' ').replace(/\s+/g, ' ').trim()
+          : '';
+        const cleanOptionText = presetItemText && presetItemText !== '장소 선택'
+          ? presetItemText.replace(/\//g, ' ').replace(/\s+/g, ' ').trim()
+          : '';
+        const regionName = cleanPresetName || cleanOptionText || name;
+        $('prod-region').value = regionName;
         const calcSize = calcSizeFromBounds(sw, ne);
-        $('prod-name').value = `${name} 3D 지형 모형 액자 (${calcSize.label})`;
+        $('prod-name').value = `${regionName} 3D 지형 모형 액자 (${calcSize.label})`;
         $('size-list').innerHTML = '';
         addSizeRowWithData('기본', calcSize.w, calcSize.h, 90000);
         $('size-auto-info').style.display = 'block';
@@ -765,9 +831,17 @@
     _aiGenerating = true;
 
     const apiKey = getSetting('apiyi_key');
+    const eccoKey = $('set-eccoapi')?.value?.trim() || '';
+    const useEcco = !!eccoKey;
     if (!apiKey) { prodLog('❌ 설정에서 Nano Banana API Key를 입력하세요', 'err'); _aiGenerating = false; return; }
 
     const prodName = $('prod-name').value.trim() || '3D 지형 모형 액자';
+    if (!$('prod-region').value.trim() && state.selectedPreset?.name) {
+      const cleanName = state.selectedPreset.name.replace(/\//g, ' ').replace(/\s+/g, ' ').trim();
+      $('prod-region').value = cleanName;
+      $('prod-name').value = `${cleanName} 3D 지형 모형 액자 (${getSizes()[0]?.width || 250}×${getSizes()[0]?.height || 174}mm)`;
+      prodLog(`📍 지역명 자동 보정: ${cleanName}`);
+    }
     const prodRegion = $('prod-region').value.trim() || '지역';
     const prodDesc = $('prod-desc').value.trim();
     const sizes = getSizes();
@@ -823,14 +897,14 @@
       // 대표 이미지 프롬프트 (새 프롬프트 적용)
       const heroPromptText = hasSamples
         ? `You are given two reference images:
-- Image 1: A real product photo of a 3D printed terrain model in a black frame. This defines the STYLE, FRAME DESIGN, and FINISH quality you must replicate exactly.
-- Image 2: A digital 3D rendering of terrain/map data. This is the TERRAIN/GEOGRAPHY that must appear inside the frame.
+- Image 1: A 3D terrain map rendering. Use the EXACT terrain, coastline, and geography from this image.
+- Image 2: A real product photo showing the BLACK FRAME STYLE and MATERIAL FINISH only. Do NOT copy the terrain from this image.
 
 YOUR TASK: Create a realistic product photo that combines:
-1. The exact same black frame style, material texture, and presentation from Image 1
-2. The terrain/geography shown in Image 2, as if it was 3D printed and placed inside that frame
+1. The terrain/geography shown in Image 1, as if it was 3D printed and placed inside that frame
+2. The exact same black frame style, material texture, and presentation from Image 2
 
-The result should look like a real photograph of the finished product — the terrain from Image 2, 3D printed and mounted in the frame style from Image 1.
+The result should look like a real photograph of the finished product — the terrain from Image 1, 3D printed and mounted in the frame style from Image 2.
 Size: ${sizeInfo}
 Output: One clean product photo, professional e-commerce style. No text, no watermarks.`
         : `Create a photorealistic product photo of a 3D printed terrain model (${sizeInfo}) inside a black wooden frame.
@@ -872,6 +946,18 @@ ${sizesText || '기본: 250×174mm — 90,000원'}
 6. uniqueness — 차별점
 7. trust — 배송/AS/신뢰도
 
+## visualPrompt 작성 규칙 (매우 중요!)
+각 섹션의 visualPrompt는 반드시 아래 규칙을 따라야 합니다:
+- 반드시 "검은 나무 액자에 들어있는 3D 지형 모형 제품"이 사진의 주인공이어야 합니다
+- 제품이 특정 장소/상황에 놓여있는 "제품 사진" 설명만 작성하세요
+- 좋은 예: "나무 책상 위에 놓인 3D 지형 액자 클로즈업, 옆에 커피잔"
+- 좋은 예: "흰 벽에 걸린 3D 지형 액자, 아래에 미니멀 소파"
+- 좋은 예: "45도 각도에서 본 3D 지형 액자 클로즈업, 입체적 지형 디테일 강조"
+- 나쁜 예: "인포그래픽", "비교 이미지", "여러 패널", "노트북 화면", "QR코드"
+- 나쁜 예: "선물 포장", "리본", "배송 박스"
+- 절대 금지: infographic, split image, panel, laptop screen, text overlay, diagram
+- 모든 섹션에서 실제 제품 사진 촬영 컨셉으로만 작성하세요
+
 JSON 형태로:
 {
   "sections": [
@@ -908,17 +994,29 @@ JSON만 출력해.`;
       updateAIProgress(5, '대표 이미지 + 텍스트 기획 병렬 생성 중...');
 
       const refImages = [];
-      if (hasSamples) refImages.push(state.sampleImages[0]);
       if (hasCapture) refImages.push(state.capturedImage);
+      if (hasSamples) refImages.push(state.sampleImages[0]);
 
       const [heroResult, planText] = await Promise.all([
         // 대표 이미지 (generateHero가 false면 null)
         generateHero
-          ? chrome.runtime.sendMessage({
-              action: 'apiyi_image',
-              prompt: heroPromptText,
-              apiKey, referenceImages: refImages, aspectRatio: '3:4'
-            }).catch(e => ({ success: false, error: e.message }))
+          ? chrome.runtime.sendMessage(
+              useEcco
+                ? {
+                    action: 'ecco_image',
+                    prompt: heroPromptText,
+                    referenceImages: refImages,
+                    aspectRatio: '3:4',
+                    eccoApiKey: eccoKey
+                  }
+                : {
+                    action: 'apiyi_image',
+                    prompt: heroPromptText,
+                    apiKey,
+                    referenceImages: refImages,
+                    aspectRatio: '3:4'
+                  }
+            ).catch(e => ({ success: false, error: e.message }))
           : Promise.resolve(null),
         // 텍스트 기획
         callAPIYI(apiKey, planPrompt)
@@ -993,18 +1091,18 @@ JSON만 출력해.`;
 
         async function generateSectionImage(section) {
           const sectionRefImages = [];
-          if (hasSamples) sectionRefImages.push(state.sampleImages[0]);
           if (hasCapture) sectionRefImages.push(state.capturedImage);
+          if (hasSamples) sectionRefImages.push(state.sampleImages[0]);
 
           const fullPrompt = `You are given two reference images:
-- Image 1: A real product photo showing the BLACK FRAME STYLE and MATERIAL FINISH only. Do NOT copy the terrain/map from this image.
-- Image 2: A 3D terrain map rendering. You MUST reproduce EXACTLY this terrain geography inside the frame — the specific coastline, river paths, road network, and building positions.
+- Image 1: A 3D terrain map rendering. Use the EXACT terrain, coastline, and geography from this image.
+- Image 2: A real product photo showing the BLACK FRAME STYLE and MATERIAL FINISH only. Do NOT copy the terrain from this image.
 
 ${section.visualPrompt}
 
 CRITICAL RULES:
-- The terrain INSIDE the frame must come from Image 2 ONLY, never from Image 1
-- Frame style (black wood, raised edges) from Image 1
+- The terrain INSIDE the frame must come from Image 1 ONLY, never from Image 2
+- Frame style (black wood, raised edges) from Image 2
 - Product is a SMALL 3D printed terrain relief model (${sizeInfo}), about the size of a paperback book
 - If furniture is in the scene, the product must appear SMALL relative to it
 - Photorealistic product photography only
@@ -1012,11 +1110,24 @@ CRITICAL RULES:
 - Must look like the same product photographed in different settings/angles`;
 
           try {
-            const resp = await chrome.runtime.sendMessage({
-              action: 'apiyi_image',
-              prompt: fullPrompt,
-              apiKey, referenceImages: sectionRefImages.slice(0, 2), aspectRatio: sectionAspectRatio
-            });
+            const refs = sectionRefImages.slice(0, 2);
+            const resp = await chrome.runtime.sendMessage(
+              useEcco
+                ? {
+                    action: 'ecco_image',
+                    prompt: fullPrompt,
+                    referenceImages: refs,
+                    aspectRatio: sectionAspectRatio,
+                    eccoApiKey: eccoKey
+                  }
+                : {
+                    action: 'apiyi_image',
+                    prompt: fullPrompt,
+                    apiKey,
+                    referenceImages: refs,
+                    aspectRatio: sectionAspectRatio
+                  }
+            );
             done++;
             updateAIProgress(35 + Math.round((done / total) * 55), `이미지 ${done}/${total} 완료`);
 
@@ -1037,8 +1148,10 @@ CRITICAL RULES:
           }
         }
 
-        const imageTasks = sectionsToGenerate.map(s => () => generateSectionImage(s));
-        await parallelLimit(imageTasks, 2);
+        for (const section of sectionsToGenerate) {
+          await generateSectionImage(section);
+          await new Promise(r => setTimeout(r, 2000)); // 2초 대기
+        }
       }
 
       updateAIProgress(100, '완료!');
@@ -1360,6 +1473,51 @@ CRITICAL RULES:
   }
 
   // ========== 풀 오토 ==========
+  async function runBatchAuto() {
+    const checkedPresets = getCheckedPresets();
+    if (checkedPresets.length === 0) {
+      prodLog('❌ 체크된 프리셋이 없습니다.', 'err');
+      return;
+    }
+
+    for (const preset of checkedPresets) {
+      const cleanName = (preset.name || '').replace(/\//g, ' ').replace(/\s+/g, ' ').trim();
+      prodLog(`\n🚀 [${cleanName}] 시작...`);
+
+      state.mapTab = 'preset';
+      state.selectedPreset = preset;
+      updateSelInfo();
+      $('prod-region').value = cleanName;
+      $('prod-region-auto').checked = true;
+
+      // 1) 지도 전송 + 탭 전환
+      await doMapStart();
+
+      // 2) 렌더링 대기
+      await new Promise(r => setTimeout(r, 30000));
+
+      // 3) 캡처
+      await doCapture();
+      if (!state.capturedImage) {
+        prodLog(`❌ [${cleanName}] 캡처 실패로 스킵`, 'err');
+        continue;
+      }
+
+      // 4) AI 생성
+      await doAIGenerate();
+
+      // 5) HTML/업로드
+      setStep(4, false);
+      renderPreview();
+      setStep(5, false);
+      await doUpload();
+
+      prodLog(`✅ [${cleanName}] 완료!`);
+      await new Promise(r => setTimeout(r, 5000));
+    }
+    prodLog(`\n🎉 배치 완료! ${checkedPresets.length}개 상품 등록`);
+  }
+
   async function doFullAuto() {
     const skip1 = !$('chk-step1').checked;
     const skip2 = !$('chk-step2').checked;
@@ -1482,6 +1640,7 @@ CRITICAL RULES:
       await chrome.storage.local.set({
         gimi9_token: $('set-gimi9').value.trim(),
         apiyi_key: $('set-apiyi').value.trim(),
+        ecco_api_key: $('set-eccoapi').value.trim(),
         naver_client_id: $('set-naver-id').value.trim(),
         naver_client_secret: $('set-naver-secret').value.trim(),
         category_id: $('set-category-id').value.trim(),

@@ -93,6 +93,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             autoMesh: msg.autoMesh,
             isRect: msg.isRect
           });
+          // 폴리곤 전송 후 해당 탭 활성화
+          await chrome.tabs.update(tabId, { active: true });
+          await chrome.windows.update(tabs[0].windowId, { focused: true });
           sendResponse({ success: true });
         } else {
           // map2model.com 새 탭 열기
@@ -109,6 +112,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             autoMesh: msg.autoMesh,
             isRect: msg.isRect
           });
+          // 폴리곤 전송 후 해당 탭 활성화
+          await chrome.tabs.update(newTab.id, { active: true });
+          await chrome.windows.update(newTab.windowId, { focused: true });
           sendResponse({ success: true, opened: true });
         }
       } catch (e) {
@@ -253,6 +259,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'apiyi_image') {
     fetchApiyiImage(msg.prompt, msg.apiKey, msg.referenceImages, msg.aspectRatio)
       .then(imageData => sendResponse({ success: true, imageData }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // EccoAPI 이미지 생성 프록시
+  if (msg.action === 'ecco_image') {
+    fetchEccoImage(msg.prompt, msg.referenceImages, msg.aspectRatio, msg.eccoApiKey)
+      .then(result => sendResponse({ success: true, ...result }))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
@@ -421,6 +435,56 @@ async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio
       await new Promise(r => setTimeout(r, 3000 * attempt));
     }
   }
+}
+
+async function fetchEccoImage(prompt, referenceImages = [], aspectRatio = '1:1', eccoApiKey = '') {
+  if (!eccoApiKey) throw new Error('EccoAPI 키가 없습니다.');
+
+  const imageBase64 = (referenceImages || [])
+    .map(img => (img || '').replace(/^data:image\/[a-z+]+;base64,/, ''))
+    .filter(Boolean);
+
+  const body = {
+    prompt,
+    aspectRatio: aspectRatio || '1:1',
+    ...(imageBase64.length > 0 ? { imageBase64 } : {})
+  };
+
+  const resp = await fetch('https://eccoapi.com/api/v1/nanobanana/generate', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${eccoApiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(data?.msg || `EccoAPI HTTP ${resp.status}`);
+  }
+  if (data.code !== 200) {
+    throw new Error(data.msg || 'EccoAPI 실패');
+  }
+
+  const assetUrl = data.data?.assetUrl || data.data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.assetUrl;
+  if (!assetUrl) throw new Error('EccoAPI 응답에 assetUrl이 없습니다.');
+
+  const imgResp = await fetch(assetUrl);
+  if (!imgResp.ok) throw new Error(`Ecco asset 다운로드 실패: HTTP ${imgResp.status}`);
+  const blob = await imgResp.blob();
+  const arrayBuf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  const mimeType = blob.type || 'image/png';
+  const base64 = `data:${mimeType};base64,${btoa(binary)}`;
+
+  return {
+    imageData: base64,
+    cost: data.meta?.cost,
+    remaining: data.meta?.remaining_credits
+  };
 }
 
 async function uploadToCloudinary(base64Image, folder = 'map2model') {

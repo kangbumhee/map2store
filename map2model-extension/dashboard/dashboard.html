@@ -83,6 +83,11 @@
               <select id="map-preset-item" disabled style="margin-top:8px">
                 <option value="">장소 선택</option>
               </select>
+              <label class="mini-check" style="margin-top:8px;display:inline-flex">
+                <input type="checkbox" id="map-preset-select-all"> 현재 카테고리 전체 선택/해제
+              </label>
+              <div id="map-preset-checklist" class="selected-tags" style="max-height:220px;overflow:auto;margin-top:8px"></div>
+              <button id="map-batch-auto-btn" class="btn-secondary" style="margin-top:8px;width:100%">🚀 선택 항목 일괄 자동등록</button>
               <p id="map-preset-desc" class="preset-desc" style="display:none"></p>
             </div>
 
@@ -363,6 +368,10 @@
               <label>Nano Banana API Key (AI 생성)</label>
               <input type="password" id="set-apiyi" placeholder="APIYI API 키">
               <p class="hint">api.apiyi.com에서 발급 — 이미지 1장당 약 68원</p>
+            </div>
+            <div class="form-group">
+              <label>EccoAPI 키 (이미지 생성)</label>
+              <input type="password" id="set-eccoapi" placeholder="nk_live_...">
             </div>
           </div>
         </div>
