@@ -713,25 +713,19 @@
 
       // 대표 이미지 프롬프트 (새 프롬프트 적용)
       const heroPromptText = hasSamples
-        ? `References: Single reference image only.
-Use the attached product image as the single and only reference.
-This reference defines the subject identity.
-Do not redesign, stylize, or improve the subject.
-Assume this is a real object photographed for a professional e-commerce listing.
+        ? `You are given two reference images:
+- Image 1: A real product photo of a 3D printed terrain model in a black frame. This defines the STYLE, FRAME DESIGN, and FINISH quality you must replicate exactly.
+- Image 2: A digital 3D rendering of terrain/map data. This is the TERRAIN/GEOGRAPHY that must appear inside the frame.
 
-The product is a 3D printed terrain relief model (${sizeInfo}) in a black wooden frame.
-The second image is the digital map/terrain that this model represents.
+YOUR TASK: Create a realistic product photo that combines:
+1. The exact same black frame style, material texture, and presentation from Image 1
+2. The terrain/geography shown in Image 2, as if it was 3D printed and placed inside that frame
 
-Goal: Generate a single realistic product photo showing this exact 3D terrain model frame.
-Prioritize clarity, truthfulness, and commercial plausibility.
-Text policy: do not invent, alter, or add any text.
-Reference lock: Strong. Preserve exact identity, proportions, and key design cues. Allow only viewpoint changes.
-Staging style: match the reference image style — mirror backdrop tone, surface type, lighting softness, shadow direction. Keep minimal and commercial. Do not introduce new props or scenery.
-
-Output: One clean product photo — front-facing full view, professional e-commerce style, on a clean surface or held by hand. No text overlay.`
-
+The result should look like a real photograph of the finished product — the terrain from Image 2, 3D printed and mounted in the frame style from Image 1.
+Size: ${sizeInfo}
+Output: One clean product photo, professional e-commerce style. No text, no watermarks.`
         : `Create a photorealistic product photo of a 3D printed terrain model (${sizeInfo}) inside a black wooden frame.
-The terrain should match the captured map showing landscape, roads, buildings, water, and green areas in raised 3D relief.
+The terrain should show landscape with roads, buildings, water, and green areas in raised 3D relief.
 Professional e-commerce product photography on clean background. No text or watermarks.`;
 
       // 텍스트 기획 프롬프트
@@ -869,16 +863,17 @@ JSON만 출력해.`;
           if (heroImage) sectionRefImages.push(heroImage);
           else if (hasCapture) sectionRefImages.push(state.capturedImage);
 
-          const fullPrompt = `References: Use the attached reference image(s) as the product identity.
-Do not redesign or improve the subject.
-This is a real 3D printed terrain model (${sizeInfo}) in a black wooden frame.
+          const fullPrompt = `You are given reference image(s) of a real 3D printed terrain model product in a black frame.
 
 ${section.visualPrompt}
 
-Staging style: match the reference — minimal commercial backdrop, consistent lighting.
-Text policy: No text, titles, watermarks, or characters on the image.
-Output: One single 9:16 vertical image. Photorealistic product photography.
-Strict: No fantasy elements. No added accessories. Must look like the same product photographed in the same session.`;
+IMPORTANT RULES:
+- The product is a 3D printed terrain relief model (${sizeInfo}) in a black frame
+- Maintain the EXACT same frame style and product appearance from the reference
+- Photorealistic product photography only
+- No text, no watermarks, no fantasy elements
+- 9:16 vertical format
+- Must look like the same product photographed in different settings/angles`;
 
           try {
             const resp = await chrome.runtime.sendMessage({
