@@ -24,6 +24,7 @@
     history: []
   };
   let _aiGenerating = false;
+  let _uploading = false;
 
   const $ = id => document.getElementById(id);
 
@@ -857,11 +858,20 @@ JSON만 출력해.`;
       state.aiSections = planData.sections || [];
       state.aiCopy = planData.productCopy || null;
       const bannedTags = ['함께 많이 찾는', '특별한 선물', '특별한선물'];
-      state.aiTags = [
+      const rawTags = [
         ...naverKeywords.slice(0, 5),
         ...(planData.tags || [])
-      ].filter(t => t && t.length >= 2 && !bannedTags.includes(t));
-      state.aiTags = [...new Set(state.aiTags)].slice(0, 10);
+      ].filter(t => t && t.length >= 2 && !bannedTags.includes(t) && !bannedTags.includes(t.replace(/\s/g, '')));
+      const seen = new Set();
+      state.aiTags = [];
+      for (const tag of rawTags) {
+        const normalized = tag.replace(/\s/g, '');
+        if (!seen.has(normalized)) {
+          seen.add(normalized);
+          state.aiTags.push(tag);
+        }
+        if (state.aiTags.length >= 10) break;
+      }
       prodLog(`✅ ${state.aiSections.length}개 섹션 기획 완료`);
       prodLog(`🏷️ 상품 태그 ${state.aiTags.length}개: ${state.aiTags.join(', ')}`);
 
@@ -1089,6 +1099,11 @@ IMPORTANT RULES:
 
   // ========== 스마트스토어 업로드 ==========
   async function doUpload() {
+    if (_uploading) {
+      prodLog('⚠️ 업로드 이미 진행 중 — 중복 호출 무시');
+      return;
+    }
+    _uploading = true;
     prodLog('🚀 스마트스토어 업로드 시작...');
     try {
       const stored = await chrome.storage.local.get([
@@ -1244,6 +1259,8 @@ IMPORTANT RULES:
     } catch (e) {
       prodLog(`❌ 업로드 실패: ${e.message}`, 'err');
       $('upload-msg').textContent = `실패: ${e.message}`;
+    } finally {
+      _uploading = false;
     }
   }
 
@@ -1271,10 +1288,13 @@ IMPORTANT RULES:
 
     // Step 2: 상품 정보
     setStep(2);
-    // 자동 입력
-    if (!$('prod-name').value.trim()) {
+    // 자동 입력 — 사이즈 포함
+    if (!$('prod-name').value.trim() || !$('prod-name').value.includes('mm')) {
       const region = $('prod-region').value || '지역';
-      $('prod-name').value = `${region} 3D 지형 모형 액자`;
+      const sizes = getSizes();
+      const sizeStr = sizes.length > 0 ? `${sizes[0].width}×${sizes[0].height}mm` : '250×174mm';
+      const baseName = `${region} 3D 지형 모형 액자`;
+      $('prod-name').value = `${baseName} (${sizeStr})`;
     }
     if (!skip2) {
       prodLog('⏸️ Step 2 확인 대기... (다음 단계 버튼 클릭)');

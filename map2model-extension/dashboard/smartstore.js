@@ -97,10 +97,18 @@ class SmartStoreAPI {
 
   // ── 상품 데이터 구성 (oliveyoung-smart-store 검증 구조) ──
   buildProductData({ name, description, detailHtml, images, sizes, categoryId, returnInfo, settings, tags }) {
-    const sellerTags = (tags || [])
-      .filter(t => t && t.length >= 2 && t !== '함께 많이 찾는')
-      .slice(0, 10)
-      .map(t => ({ text: t }));
+    // 네이버는 띄어쓰기 무시 후 중복 판정 → 정규화 중복 제거
+    const bannedTags = ['특별한선물', '함께많이찾는'];
+    const seenNorm = new Set();
+    const sellerTags = [];
+    for (const t of (tags || [])) {
+      if (!t || t.length < 2) continue;
+      const norm = t.replace(/\s/g, '');
+      if (seenNorm.has(norm) || bannedTags.includes(norm)) continue;
+      seenNorm.add(norm);
+      sellerTags.push({ text: t });
+      if (sellerTags.length >= 10) break;
+    }
 
     // 설정값 (대시보드 설정에서 가져옴)
     const outboundCode = settings?.outboundShippingPlaceCode || 100797935;
