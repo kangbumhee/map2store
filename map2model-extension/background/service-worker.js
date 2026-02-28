@@ -330,9 +330,8 @@ async function fetchApiyiText(prompt, apiKey, maxTokens = 8192) {
 }
 
 async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio = '9:16') {
-  // btktool-apiyi와 동일: gemini-3-pro-image-preview-4k, vip.apiyi.com
-  const modelName = 'gemini-3-pro-image-preview-4k';
-  const url = `https://vip.apiyi.com/v1beta/models/${modelName}:generateContent`;
+  // Nano Banana 일반 — $0.02/장
+  const url = 'https://api.apiyi.com/v1beta/models/gemini-2.5-flash-image:generateContent';
   const parts = [];
 
   // 참조 이미지 (최대 3장) — snake_case 사용
@@ -352,8 +351,10 @@ async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio
     contents: [{ role: 'user', parts }],
     generationConfig: {
       responseModalities: ['IMAGE'],
-      resolution: '4K',
-      aspectRatio: aspectRatio
+      imageConfig: {
+        aspectRatio: aspectRatio,
+        imageSize: '2K'
+      }
     }
   });
 
