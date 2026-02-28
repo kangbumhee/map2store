@@ -15,12 +15,14 @@
     selectedDongs: [],
     selectedPreset: null,
     capturedImage: null,
+    sampleImages: [],
     extraImages: [],
     aiSections: [],
     aiCopy: null,
     currentStep: 1,
     history: []
   };
+  let _aiGenerating = false;
 
   const $ = id => document.getElementById(id);
 
@@ -368,11 +370,24 @@
 
     // Step 2: 사이즈 추가/삭제
     $('add-size-btn').addEventListener('click', addSizeRow);
+    $('auto-size-btn').addEventListener('click', autoCalculateSize);
     $('size-list').addEventListener('click', (e) => {
       if (e.target.classList.contains('btn-del-sz')) {
         e.target.closest('.size-row').remove();
       }
     });
+
+    // 실물 샘플 사진
+    const sampleDrop = $('sample-drop');
+    const sampleFile = $('sample-file');
+    sampleDrop.addEventListener('click', () => sampleFile.click());
+    sampleDrop.addEventListener('dragover', (e) => { e.preventDefault(); sampleDrop.classList.add('dragging'); });
+    sampleDrop.addEventListener('dragleave', () => sampleDrop.classList.remove('dragging'));
+    sampleDrop.addEventListener('drop', (e) => {
+      e.preventDefault(); sampleDrop.classList.remove('dragging');
+      handleSampleFiles(e.dataTransfer.files);
+    });
+    sampleFile.addEventListener('change', () => handleSampleFiles(sampleFile.files));
 
     // 추가 이미지
     const drop = $('extra-drop');
@@ -391,6 +406,12 @@
     // Step 3: AI 생성
     $('ai-regen-btn').addEventListener('click', doAIGenerate);
     $('ai-confirm-btn').addEventListener('click', () => setStep(4));
+    $('ai-section-limit').addEventListener('input', () => {
+      const val = parseInt($('ai-section-limit').value, 10);
+      $('ai-section-limit-label').textContent = `${val} / 7`;
+      const cost = (val * 0.02).toFixed(2);
+      $('ai-cost-estimate').textContent = `약 $${cost} (${Math.round(val * 27)}원)`;
+    });
 
     // Step 4: 미리보기
     $('preview-confirm').addEventListener('click', () => setStep(5));
@@ -413,7 +434,7 @@
       $(`step${i}-card`).style.display = i === n ? 'block' : 'none';
     }
     // 스텝 시작 동작
-    if (n === 3) doAIGenerate();
+    if (n === 3 && !_aiGenerating) doAIGenerate();
     if (n === 5) doUpload();
   }
 
@@ -425,6 +446,7 @@
       $('capture-preview-img').src = resp.dataUrl;
       $('capture-preview-area').style.display = 'block';
       prodLog('✅ 캡처 완료!', 'ok');
+      autoCalculateSize();
     } else {
       prodLog(`❌ 캡처 실패: ${resp.error}. map2model.com을 먼저 열어주세요.`, 'err');
     }
@@ -441,6 +463,84 @@
       <input type="number" class="sz-price" value="" placeholder="원">
       <button class="btn-del-sz">✕</button>`;
     $('size-list').appendChild(row);
+  }
+
+  function addSizeRowWithData(label, w, h, price) {
+    const row = document.createElement('div');
+    row.className = 'size-row';
+    row.innerHTML = `
+      <input type="text" class="sz-label" value="${label}" placeholder="이름">
+      <input type="number" class="sz-w" value="${w}" placeholder="가로mm">
+      <span class="sz-x">×</span>
+      <input type="number" class="sz-h" value="${h}" placeholder="세로mm">
+      <input type="number" class="sz-price" value="${price}" placeholder="원">
+      <button class="btn-del-sz">✕</button>`;
+    $('size-list').appendChild(row);
+  }
+
+  function autoCalculateSize() {
+    if (!state.capturedImage) return;
+
+    const img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      const ratio = w / h;
+
+      const longSide = 250;
+      const shortSide = Math.round(longSide / (ratio > 1 ? ratio : (1 / ratio)));
+
+      // 항상 긴 쪽이 250mm
+      let mmW;
+      let mmH;
+      if (ratio >= 1) {
+        mmW = longSide;
+        mmH = shortSide;
+      } else {
+        mmW = shortSide;
+        mmH = longSide;
+      }
+
+      $('size-auto-info').style.display = 'block';
+      $('size-auto-text').innerHTML = `캡처 비율: ${w}×${h}px (${ratio.toFixed(2)}) → <strong>${mmW}×${mmH}mm</strong>`;
+
+      // 기존 사이즈 목록 초기화 후 자동 입력
+      $('size-list').innerHTML = '';
+      addSizeRowWithData('기본', mmW, mmH, 90000);
+    };
+    img.src = state.capturedImage;
+  }
+
+  function handleSampleFiles(files) {
+    Array.from(files).forEach(file => {
+      if (!file.type.startsWith('image/')) return;
+      if (state.sampleImages.length >= 3) {
+        prodLog('⚠️ 샘플 사진은 최대 3장까지', 'err');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        state.sampleImages.push(e.target.result);
+        renderSampleThumbs();
+        prodLog(`📸 샘플 사진 추가 (${state.sampleImages.length}/3)`);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function renderSampleThumbs() {
+    $('sample-thumbs').innerHTML = state.sampleImages.map((img, i) =>
+      `<div class="thumb-item">
+        <img src="${img}" alt="샘플${i+1}">
+        <button class="thumb-del" data-sidx="${i}">✕</button>
+      </div>`
+    ).join('');
+    $('sample-thumbs').querySelectorAll('.thumb-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.sampleImages.splice(parseInt(btn.dataset.sidx, 10), 1);
+        renderSampleThumbs();
+      });
+    });
   }
 
   function handleExtraFiles(files) {
@@ -486,11 +586,33 @@
     return sizes;
   }
 
+  // 동시 요청 제한 (API rate limit 대응)
+  async function parallelLimit(tasks, limit = 2) {
+    const results = [];
+    const executing = [];
+    for (const task of tasks) {
+      const p = task().then(r => {
+        executing.splice(executing.indexOf(p), 1);
+        return r;
+      });
+      results.push(p);
+      executing.push(p);
+      if (executing.length >= limit) {
+        await Promise.race(executing);
+      }
+    }
+    return Promise.all(results);
+  }
+
   // ========== AI 상세페이지 생성 ==========
   async function doAIGenerate() {
+    if (_aiGenerating) return;
+    _aiGenerating = true;
+
     const apiKey = getSetting('apiyi_key');
     if (!apiKey) {
       prodLog('❌ 설정에서 Nano Banana API Key를 입력하세요', 'err');
+      _aiGenerating = false;
       return;
     }
 
@@ -498,16 +620,93 @@
     const prodRegion = $('prod-region').value.trim() || '지역';
     const prodDesc = $('prod-desc').value.trim();
     const sizes = getSizes();
+    const hasSamples = state.sampleImages.length > 0;
+    const hasCapture = !!state.capturedImage;
 
     $('ai-gen-result').style.display = 'none';
     $('ai-gen-progress').style.display = 'block';
     updateAIProgress(0, '상세페이지 기획 중...');
 
     try {
+      // 섹션 수 제한
+      const sectionLimit = parseInt($('ai-section-limit')?.value || '7', 10);
+      prodLog(`🎯 이미지 생성 제한: ${sectionLimit}개 (0=텍스트만)`);
+
+      const generateHero = sectionLimit > 0 && hasCapture;
+
+      // ═══════════════════════════════════════
+      // 0단계: 실물 + 캡처 → 합성 대표 이미지 생성
+      // ═══════════════════════════════════════
+      let heroImage = null;
+
+      if (generateHero) {
+        prodLog('🎨 대표 이미지 생성 중 (캡처 맵 → 실물 액자 스타일)...');
+        updateAIProgress(5, '대표 이미지 생성 중...');
+
+        // 참조 이미지: 실물 샘플(최대 1장) + 캡처 이미지
+        const refImages = [];
+        if (hasSamples) refImages.push(state.sampleImages[0]);
+        refImages.push(state.capturedImage);
+
+        const heroPrompt = hasSamples
+          ? `Look at the reference photos carefully.
+
+The FIRST image is a real photograph of a 3D printed terrain model in a black wooden frame. This is the actual physical product - notice the raised terrain, buildings, roads, green areas, and water features all in 3D relief.
+
+The SECOND image is a digital map capture that needs to be visualized as if it were 3D printed in the exact same style as the first photo.
+
+Create a photorealistic product photo showing the SECOND map as a completed 3D printed terrain model inside a black wooden frame, exactly matching the style, texture, and quality of the FIRST reference photo.
+
+Requirements:
+- Same black wooden frame style as reference
+- 3D raised terrain with buildings, roads, greenery visible
+- Realistic lighting and shadows on the 3D surface
+- Product photo on clean white/light background
+- Held by hand or displayed on a wooden desk
+- NO text, watermarks, or labels on the image
+- Professional e-commerce product photography style`
+
+          : `Create a photorealistic product photo of a 3D printed terrain model inside an elegant black wooden frame.
+
+The terrain should match this captured map - showing the landscape, roads, buildings, water, and green areas in raised 3D relief.
+
+Requirements:
+- Black wooden picture frame
+- 3D raised terrain clearly visible with buildings, roads, parks
+- Realistic lighting creating shadows on terrain features
+- Product photo on clean background
+- Professional e-commerce product photography
+- NO text, watermarks, or labels`;
+
+        try {
+          const heroResp = await chrome.runtime.sendMessage({
+            action: 'apiyi_image',
+            prompt: heroPrompt,
+            apiKey: apiKey,
+            referenceImages: refImages,
+            aspectRatio: '3:4'
+          });
+          if (heroResp.success) {
+            heroImage = heroResp.imageData;
+            prodLog('✅ 대표 이미지 생성 완료!', 'ok');
+          } else {
+            prodLog(`⚠️ 대표 이미지 실패: ${heroResp.error} — 캡처 이미지 사용`);
+          }
+        } catch (e) {
+          prodLog(`⚠️ 대표 이미지 오류: ${e.message}`);
+        }
+      }
+
+      updateAIProgress(15, '기획 텍스트 생성 중...');
+
+      // ═══════════════════════════════════════
       // 1단계: AI 기획 (텍스트)
+      // ═══════════════════════════════════════
       prodLog('🤖 AI 상세페이지 기획 생성 중...');
 
-      const sizesText = sizes.map(s => `${s.label}: ${s.width}×${s.height}mm — ${s.price.toLocaleString()}원`).join('\n');
+      const sizesText = sizes.map(s =>
+        `${s.label}: ${s.width}×${s.height}mm — ${s.price.toLocaleString()}원`
+      ).join('\n');
 
       const planPrompt = `너는 한국 이커머스 상세페이지 전문 기획자야.
 아래 상품의 스마트스토어 상세페이지를 7개 섹션으로 기획해줘.
@@ -515,26 +714,32 @@
 ## 상품 정보
 - 상품명: ${prodName}
 - 지역: ${prodRegion}
-- 설명: ${prodDesc || '실제 지형 데이터를 기반으로 3D 프린팅한 세상에 하나뿐인 지형 모형 액자입니다. 벽에 걸거나 책상에 놓을 수 있으며, 인테리어 소품으로 완벽합니다.'}
+- 설명: ${prodDesc || '실제 위성 지형 데이터를 기반으로 3D 프린팅한 세상에 하나뿐인 지형 모형 액자입니다. 벽에 걸거나 책상에 놓을 수 있으며, 인테리어 소품으로 완벽합니다.'}
 - 사이즈/가격:
 ${sizesText || 'S: 150×100mm — 59,000원\nM: 250×150mm — 90,000원\nL: 400×250mm — 150,000원'}
 
-## 중요 포인트
-- 이 제품은 세상에 없던 완전히 새로운 상품이다
+## 핵심 셀링 포인트
+- 이 제품은 세상에 없던 완전히 새로운 카테고리의 상품이다
 - 실제 위성 지형 데이터를 기반으로 한 정밀 3D 프린팅
+- 건물, 도로, 공원, 물길이 모두 입체적으로 표현됨
 - 내가 사는 동네, 추억의 장소, 좋아하는 도시를 입체적으로 소장
-- 선물용으로도 완벽 (집들이, 기념일, 졸업 등)
-- 액자 프레임 포함, 벽걸이 가능
-- 주문 제작 (7~14일 소요)
+- 선물용으로 완벽 (집들이, 기념일, 졸업, 전역, 프로포즈 등)
+- 액자 프레임 포함, 벽걸이 & 탁상 거치 모두 가능
+- 주문 제작 (3일 이내 배송)
+
+## FAQ 작성 시 주의
+- "액자 프레임 색상 변경 가능한가요?" 질문은 포함하지 마세요
+- "원하는 지역은 어떻게 지정하나요?" 질문은 포함하지 마세요
+- 제작 기간은 "3일 이내"로 안내하세요
 
 ## 섹션 구조 (7개)
-1. hook — 후킹 (감성적 첫인상)
-2. solution — 이 상품이 뭔지 설명
-3. clarity — 스펙/사이즈 비교
-4. socialProof — 활용 사례/리뷰
-5. service — 주문 과정 안내
-6. comparison — 차별점
-7. riskReversal — 배송/AS/주문제작 안내
+1. hook — 후킹 (감성적 첫인상, "당신의 도시를 손에 넣다")
+2. product — 제품 상세 설명 (3D 프린팅 공정, 소재)
+3. sizes — 사이즈별 비교 & 가격
+4. lifestyle — 실제 활용 사례 (인테리어, 선물)
+5. process — 주문→제작→배송 과정 안내
+6. uniqueness — 차별점 & 왜 세상에 없는 제품인지
+7. trust — 배송/AS/주문제작 안내, 신뢰도
 
 각 섹션별로 아래 JSON 형태로 기획해줘:
 {
@@ -543,16 +748,16 @@ ${sizesText || 'S: 150×100mm — 59,000원\nM: 250×150mm — 90,000원\nL: 400
       "order": 1,
       "logicType": "hook",
       "title": "섹션 제목",
-      "keyMessage": "메인 카피 (한글, 2줄 이내, 감성적)",
-      "subMessage": "보조 카피",
-      "visualPrompt": "English prompt for 9:16 vertical product photo. Must include: 3D terrain model in frame, elegant interior setting. NO TEXT on image."
+      "keyMessage": "메인 카피 (한글, 2줄 이내, 감성적이고 강렬하게)",
+      "subMessage": "보조 카피 (한글)",
+      "visualPrompt": "English prompt for generating a 9:16 vertical product image. The product is a 3D printed terrain model in a black wooden frame showing actual terrain with raised buildings, roads, parks, and water. Must look like a real photograph of the physical product. NO TEXT on image."
     }
   ],
   "productCopy": {
     "catchphrase": "짧은 캐치프레이즈",
     "headline": "메인 헤드라인",
-    "description": "상세 설명 (200자 이상, 감성적으로)",
-    "specs": [{"label": "소재", "value": "PLA 친환경 소재"}, ...],
+    "description": "상세 설명 (200자 이상, 감성적이면서 제품 특징 강조)",
+    "specs": [{"label": "소재", "value": "PLA 친환경 소재 + 원목 프레임"}, ...],
     "faq": [{"question": "질문", "answer": "답변"}, ...]
   }
 }
@@ -560,7 +765,7 @@ ${sizesText || 'S: 150×100mm — 59,000원\nM: 250×150mm — 90,000원\nL: 400
 JSON만 출력해.`;
 
       const planText = await callAPIYI(apiKey, planPrompt);
-      updateAIProgress(20, '기획 완료, 이미지 생성 시작...');
+      updateAIProgress(25, '기획 완료, 섹션 이미지 생성 시작...');
 
       // JSON 파싱
       let planData;
@@ -580,65 +785,110 @@ JSON만 출력해.`;
       state.aiCopy = planData.productCopy || null;
       prodLog(`✅ ${state.aiSections.length}개 섹션 기획 완료`);
 
-      // 2단계: 이미지 병렬 생성
-      prodLog(`🎨 ${state.aiSections.length}개 이미지 병렬 생성 시작...`);
-      const total = state.aiSections.length;
-      let done = 0;
+      // 대표 이미지가 있으면 첫 번째 섹션에 삽입
+      if (heroImage && state.aiSections.length > 0) {
+        // Cloudinary에 업로드
+        try {
+          const uploadResp = await chrome.runtime.sendMessage({
+            action: 'cloudinary_upload',
+            base64: heroImage,
+            folder: 'map2model-products'
+          });
+          state.aiSections[0].imageUrl = uploadResp.success ? uploadResp.url : heroImage;
+        } catch (e) {
+          state.aiSections[0].imageUrl = heroImage;
+        }
+        prodLog('✅ 대표 이미지 → 섹션 1 적용');
+      }
 
-      const imagePromises = state.aiSections.map(async (section, idx) => {
-        const fullPrompt = `Create a professional e-commerce product detail image for a Korean online store.
+      // ═══════════════════════════════════════
+      // 2단계: 나머지 섹션 이미지 (제한 적용)
+      // ═══════════════════════════════════════
+      const remainingLimit = Math.max(0, sectionLimit - (heroImage ? 1 : 0));
+
+      const sectionsToGenerate = state.aiSections
+        .filter((sec, idx) =>
+        !(idx === 0 && heroImage)
+        )
+        .slice(0, remainingLimit);
+
+      if (sectionsToGenerate.length === 0 && !heroImage) {
+        prodLog('⏭️ 이미지 생성 스킵 (텍스트 기획만 완료)');
+        updateAIProgress(100, '완료! (텍스트만)');
+      } else {
+        prodLog(`🎨 ${sectionsToGenerate.length}개 섹션 이미지 생성 시작...`);
+        const total = sectionsToGenerate.length;
+        let done = 0;
+
+        async function generateSectionImage(section) {
+          // 참조 이미지: 실물 샘플 + 캡처 맵
+          const refImages = [];
+          if (hasSamples) refImages.push(state.sampleImages[0]);
+          // 대표 이미지가 있으면 스타일 참조로 추가
+          if (heroImage) refImages.push(heroImage);
+          else if (hasCapture) refImages.push(state.capturedImage);
+
+          const fullPrompt = `Create a professional e-commerce product detail image for a Korean online store.
+
+IMPORTANT CONTEXT: The product is a 3D printed terrain model in a black wooden frame. Real satellite terrain data is used to create a physical model showing buildings, roads, parks, and water features in raised 3D relief.
+
+${hasSamples ? 'The FIRST reference image shows what the actual finished product looks like - a real photograph of the 3D terrain model. Match this style exactly.' : ''}
+${hasCapture ? `The ${hasSamples ? 'SECOND' : 'FIRST'} reference image is the map that was used to create this terrain model.` : ''}
 
 ${section.visualPrompt}
 
-IMPORTANT RULES:
-- NO text, titles, watermarks, or Korean characters on the image
-- NO boxes, frames, borders for text
-- Clean, elegant product photography
-- Target: Korean interior/gift market
-- Product: 3D printed terrain model in wooden frame
+STRICT RULES:
+- NO text, titles, watermarks, Korean or English characters on the image
+- NO text overlay boxes or banners
+- Show the physical 3D printed terrain model product
+- Photorealistic product photography style
+- Warm, inviting lighting
+- Target: Korean premium interior/gift market`;
 
-Style: Modern Korean e-commerce, warm lighting, lifestyle setting`;
+          try {
+            const resp = await chrome.runtime.sendMessage({
+              action: 'apiyi_image',
+              prompt: fullPrompt,
+              apiKey: apiKey,
+              referenceImages: refImages.slice(0, 2),
+              aspectRatio: '9:16'
+            });
 
-        try {
-          const resp = await chrome.runtime.sendMessage({
-            action: 'apiyi_image',
-            prompt: fullPrompt,
-            apiKey: apiKey,
-            referenceImages: state.capturedImage ? [state.capturedImage] : [],
-            aspectRatio: '9:16'
-          });
-
-          done++;
-          updateAIProgress(20 + Math.round((done / total) * 70), `이미지 ${done}/${total} 생성 완료`);
-
-          if (resp.success) {
-            // Cloudinary 업로드
-            try {
-              const uploadResp = await chrome.runtime.sendMessage({
-                action: 'cloudinary_upload',
-                base64: resp.imageData,
-                folder: 'map2model-products'
-              });
-              section.imageUrl = uploadResp.success ? uploadResp.url : resp.imageData;
-            } catch (e) {
-              section.imageUrl = resp.imageData;
+            if (total > 0) {
+              done++;
+              updateAIProgress(25 + Math.round((done / total) * 65), `이미지 ${done}/${total} 생성 완료`);
             }
-            prodLog(`  ✅ 섹션 ${idx + 1} 이미지 OK`);
-          } else {
-            prodLog(`  ❌ 섹션 ${idx + 1} 실패: ${resp.error}`, 'err');
+
+            if (resp.success) {
+              try {
+                const uploadResp = await chrome.runtime.sendMessage({
+                  action: 'cloudinary_upload',
+                  base64: resp.imageData,
+                  folder: 'map2model-products'
+                });
+                section.imageUrl = uploadResp.success ? uploadResp.url : resp.imageData;
+              } catch (e) {
+                section.imageUrl = resp.imageData;
+              }
+              prodLog(`  ✅ ${section.logicType} 이미지 OK`);
+            } else {
+              prodLog(`  ❌ ${section.logicType} 실패: ${resp.error}`, 'err');
+              section.imageUrl = null;
+            }
+          } catch (e) {
+            if (total > 0) done++;
+            prodLog(`  ❌ ${section.logicType} 오류: ${e.message}`, 'err');
             section.imageUrl = null;
           }
-        } catch (e) {
-          done++;
-          prodLog(`  ❌ 섹션 ${idx + 1} 오류: ${e.message}`, 'err');
-          section.imageUrl = null;
         }
-      });
 
-      await Promise.all(imagePromises);
-      updateAIProgress(100, '완료!');
+        const imageTasks = sectionsToGenerate.map(section => () => generateSectionImage(section));
+        await parallelLimit(imageTasks, 2);
+        updateAIProgress(100, '완료!');
+      }
 
-      prodLog(`✅ AI 생성 완료!`, 'ok');
+      const successCount = state.aiSections.filter(s => s.imageUrl).length;
+      prodLog(`✅ AI 생성 완료! (${successCount}/${state.aiSections.length}개 이미지)`, 'ok');
 
       // 결과 표시
       renderAISections();
@@ -648,6 +898,8 @@ Style: Modern Korean e-commerce, warm lighting, lifestyle setting`;
     } catch (e) {
       prodLog(`❌ AI 생성 실패: ${e.message}`, 'err');
       updateAIProgress(0, '실패');
+    } finally {
+      _aiGenerating = false;
     }
   }
 

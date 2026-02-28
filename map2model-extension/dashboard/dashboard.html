@@ -208,36 +208,30 @@
               <textarea id="prod-desc" rows="4" placeholder="이 상품은 실제 지형 데이터를 기반으로 3D 프린팅한 세상에 하나뿐인 작품입니다..."></textarea>
             </div>
 
-            <!-- 사이즈별 가격 -->
+            <!-- 사이즈 자동 계산 -->
             <div class="form-group">
-              <label>📐 사이즈별 가격</label>
-              <div id="size-list">
-                <div class="size-row">
-                  <input type="text" class="sz-label" value="S" placeholder="이름">
-                  <input type="number" class="sz-w" value="150" placeholder="가로mm">
-                  <span class="sz-x">×</span>
-                  <input type="number" class="sz-h" value="100" placeholder="세로mm">
-                  <input type="number" class="sz-price" value="59000" placeholder="원">
-                  <button class="btn-del-sz">✕</button>
-                </div>
-                <div class="size-row">
-                  <input type="text" class="sz-label" value="M" placeholder="이름">
-                  <input type="number" class="sz-w" value="250" placeholder="가로mm">
-                  <span class="sz-x">×</span>
-                  <input type="number" class="sz-h" value="150" placeholder="세로mm">
-                  <input type="number" class="sz-price" value="90000" placeholder="원">
-                  <button class="btn-del-sz">✕</button>
-                </div>
-                <div class="size-row">
-                  <input type="text" class="sz-label" value="L" placeholder="이름">
-                  <input type="number" class="sz-w" value="400" placeholder="가로mm">
-                  <span class="sz-x">×</span>
-                  <input type="number" class="sz-h" value="250" placeholder="세로mm">
-                  <input type="number" class="sz-price" value="150000" placeholder="원">
-                  <button class="btn-del-sz">✕</button>
-                </div>
+              <label>📐 사이즈 (긴 쪽 250mm 기준, 캡처 비율로 자동 계산)</label>
+              <div id="size-auto-info" class="selection-info" style="display:none">
+                <div id="size-auto-text"></div>
               </div>
-              <button id="add-size-btn" class="btn-secondary" style="margin-top:6px">+ 사이즈 추가</button>
+              <div id="size-list">
+                <!-- 자동 생성됨 -->
+              </div>
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <button id="add-size-btn" class="btn-secondary">+ 사이즈 수동 추가</button>
+                <button id="auto-size-btn" class="btn-secondary">🔄 비율 재계산</button>
+              </div>
+            </div>
+
+            <!-- 실물 샘플 사진 (AI 참조용) -->
+            <div class="form-group">
+              <label>🖼️ 실물 액자 샘플 사진 (AI가 이 스타일로 이미지 생성)</label>
+              <p class="hint">실제 3D 프린팅된 액자 사진을 올려주세요. AI가 이 실물을 참고하여 캡처된 맵을 액자 형태로 만들어줍니다.</p>
+              <div class="file-drop" id="sample-drop">
+                <input type="file" id="sample-file" multiple accept="image/*" style="display:none">
+                <p>📸 실물 액자 사진을 드래그하거나 클릭 (최대 3장)</p>
+              </div>
+              <div id="sample-thumbs" class="thumb-grid"></div>
             </div>
 
             <!-- 추가 이미지 -->
@@ -258,6 +252,16 @@
         <div class="card step-card" id="step3-card" style="display:none">
           <div class="card-header"><h3>🤖 Step 3 — AI 상세페이지 생성</h3></div>
           <div class="card-body">
+            <!-- 이미지 생성 섹션 수 제한 (테스트용) -->
+            <div class="form-group" style="margin-bottom:12px">
+              <label>🎨 이미지 생성 섹션 수</label>
+              <div style="display:flex;align-items:center;gap:12px">
+                <input type="range" id="ai-section-limit" min="0" max="7" value="2" style="flex:1;accent-color:#3b82f6">
+                <span id="ai-section-limit-label" style="font-size:14px;font-weight:700;color:#3b82f6;min-width:80px;text-align:center">2 / 7</span>
+              </div>
+              <p class="hint">0 = 텍스트 기획만 (이미지 생성 없음) · 테스트 시 1~2개 권장 · 비용: <span id="ai-cost-estimate">약 $0.04</span></p>
+            </div>
+
             <div id="ai-gen-progress">
               <div class="progress-bar">
                 <div class="progress-fill" id="ai-progress-bar" style="width:0%"></div>
@@ -382,7 +386,8 @@
 
   </main>
 
-  <script src="dashboard.js"></script>
+  <script src="bcrypt.min.js"></script>
   <script src="smartstore.js"></script>
+  <script src="dashboard.js"></script>
 </body>
 </html>

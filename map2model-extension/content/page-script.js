@@ -61,6 +61,18 @@
       if (!map) { await captureMap(); map = window.__m2m_map; }
       if (!map) throw new Error('지도를 찾을 수 없습니다. 지도를 드래그 후 재시도.');
 
+      // 기존 폴리곤 있으면 Map Preview로 전환 후 Clear
+      try {
+        // Map Preview 버튼 클릭 (3D Preview 상태에서는 폴리곤 그리기 불가)
+        const mapPreviewBtn = [...document.querySelectorAll('a, button, div')]
+          .find(el => el.textContent.trim() === 'Map Preview');
+        if (mapPreviewBtn) {
+          mapPreviewBtn.click();
+          await sleep(1000);
+          sendStatus('🔄 Map Preview 모드로 전환');
+        }
+      } catch (e) { /* ignore */ }
+
       const clearBtn = findButton('Clear Shape');
       if (clearBtn) { clearBtn.click(); await sleep(500); sendStatus('🧹 기존 도형 초기화'); }
 

@@ -1,11 +1,10 @@
 // ========================================
-// background/service-worker.js — v10.0
+// background/service-worker.js — v10.1
 // 대시보드 탭 관리 + API 프록시
 // ========================================
 
 // ── 확장 아이콘 클릭 ──
 chrome.action.onClicked.addListener(async (tab) => {
-  // map2model.com에 있으면 → 기존 패널 토글
   if (tab.url && tab.url.includes('map2model.com')) {
     try {
       await chrome.scripting.executeScript({
@@ -13,11 +12,9 @@ chrome.action.onClicked.addListener(async (tab) => {
         files: ['content/content-script.js']
       });
     } catch (e) { /* already injected */ }
-    chrome.tabs.sendMessage(tab.id, { action: 'togglePanel' });
+    chrome.tabs.sendMessage(tab.id, { action: 'togglePanel' }).catch(() => {});
     return;
   }
-
-  // 그 외 → 대시보드 열기
   const dashUrl = chrome.runtime.getURL('dashboard/dashboard.html');
   const existing = await chrome.tabs.query({ url: dashUrl });
   if (existing.length > 0) {
@@ -26,6 +23,47 @@ chrome.action.onClicked.addListener(async (tab) => {
     chrome.tabs.create({ url: dashUrl });
   }
 });
+
+// ── 탭 로드 대기 헬퍼 ──
+function waitForTabLoad(tabId) {
+  return new Promise((resolve) => {
+    function listener(id, info) {
+      if (id === tabId && info.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+// ── content script 주입 + 준비 대기 ──
+async function ensureContentScript(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content/content-script.js']
+    });
+  } catch (e) { /* already injected */ }
+  // page-script.js 주입 + Leaflet 캡처 대기
+  await new Promise(r => setTimeout(r, 3000));
+}
+
+// ── 안전한 메시지 전송 (재시도 포함) ──
+async function safeSendMessage(tabId, message, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const resp = await chrome.tabs.sendMessage(tabId, message);
+      return resp;
+    } catch (e) {
+      if (i < retries - 1) {
+        await new Promise(r => setTimeout(r, 2000));
+      } else {
+        throw e;
+      }
+    }
+  }
+}
 
 // ── 메시지 핸들러 ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -40,67 +78,170 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // map2model 탭에 폴리곤 전송
   if (msg.action === 'sendPolygonToMap') {
-    chrome.tabs.query({ url: 'https://map2model.com/*' }, (tabs) => {
-      if (tabs.length > 0) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          action: 'injectAndDraw',
-          coords: msg.coords,
-          name: msg.name,
-          autoMesh: msg.autoMesh,
-          isRect: msg.isRect
-        });
-        sendResponse({ success: true });
-      } else {
-        // map2model.com 새 탭 열기
-        chrome.tabs.create({ url: 'https://map2model.com' }, (newTab) => {
-          // 로드 완료 후 전송
-          chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-            if (tabId === newTab.id && info.status === 'complete') {
-              chrome.tabs.onUpdated.removeListener(listener);
-              setTimeout(() => {
-                chrome.scripting.executeScript({
-                  target: { tabId: newTab.id },
-                  files: ['content/content-script.js']
-                }).then(() => {
-                  setTimeout(() => {
-                    chrome.tabs.sendMessage(newTab.id, {
-                      action: 'injectAndDraw',
-                      coords: msg.coords,
-                      name: msg.name,
-                      autoMesh: msg.autoMesh,
-                      isRect: msg.isRect
-                    });
-                  }, 2000);
-                });
-              }, 1000);
-            }
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ url: 'https://map2model.com/*' });
+
+        if (tabs.length > 0) {
+          const tabId = tabs[0].id;
+          // 탭이 이미 있으면 content script 확인 후 전송
+          await ensureContentScript(tabId);
+          await safeSendMessage(tabId, {
+            action: 'injectAndDraw',
+            coords: msg.coords,
+            name: msg.name,
+            autoMesh: msg.autoMesh,
+            isRect: msg.isRect
+          });
+          sendResponse({ success: true });
+        } else {
+          // map2model.com 새 탭 열기
+          const newTab = await chrome.tabs.create({ url: 'https://map2model.com' });
+          // 로드 완료 대기
+          await waitForTabLoad(newTab.id);
+          // content script 주입 + 준비 대기
+          await ensureContentScript(newTab.id);
+          // 폴리곤 전송
+          await safeSendMessage(newTab.id, {
+            action: 'injectAndDraw',
+            coords: msg.coords,
+            name: msg.name,
+            autoMesh: msg.autoMesh,
+            isRect: msg.isRect
           });
           sendResponse({ success: true, opened: true });
-        });
+        }
+      } catch (e) {
+        console.error('[SW] sendPolygonToMap error:', e);
+        sendResponse({ success: false, error: e.message });
       }
-    });
+    })();
     return true;
   }
 
-  // map2model 스크린샷 캡처
+  // map2model 스크린샷 캡처 (모델링 영역만)
   if (msg.action === 'captureMap') {
-    chrome.tabs.query({ url: 'https://map2model.com/*' }, (tabs) => {
-      if (tabs.length > 0) {
-        chrome.tabs.captureVisibleTab(tabs[0].windowId, { format: 'png' }, (dataUrl) => {
-          if (chrome.runtime.lastError) {
-            sendResponse({ success: false, error: chrome.runtime.lastError.message });
-          } else {
-            sendResponse({ success: true, dataUrl });
-          }
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ url: 'https://map2model.com/*' });
+        if (tabs.length === 0) {
+          sendResponse({ success: false, error: 'map2model.com 탭이 없습니다. 먼저 맵 생성을 실행하세요.' });
+          return;
+        }
+        const tabId = tabs[0].id;
+
+        // 1) 탭 활성화
+        await chrome.tabs.update(tabId, { active: true });
+        await new Promise(r => setTimeout(r, 800));
+
+        // 2) 전체 화면 캡처
+        const dataUrl = await new Promise((resolve, reject) => {
+          chrome.tabs.captureVisibleTab(tabs[0].windowId, { format: 'png' }, (result) => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve(result);
+          });
         });
-      } else {
-        sendResponse({ success: false, error: 'map2model.com 탭이 없습니다' });
+
+        // 3) map2model의 맵 영역 좌표를 content script에서 가져오기
+        let cropRect = null;
+        try {
+          const [result] = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => {
+              // 맵 프리뷰 캔버스 또는 컨테이너 찾기
+              const selectors = [
+                'canvas',
+                '.mapPreview',
+                '[class*="preview"]',
+                '[class*="canvas"]',
+                '.leaflet-container',
+                '#map'
+              ];
+
+              let el = null;
+              // 가장 큰 canvas 찾기
+              const canvases = document.querySelectorAll('canvas');
+              if (canvases.length > 0) {
+                let maxArea = 0;
+                canvases.forEach(c => {
+                  const rect = c.getBoundingClientRect();
+                  const area = rect.width * rect.height;
+                  if (area > maxArea && rect.width > 200 && rect.height > 200) {
+                    maxArea = area;
+                    el = c;
+                  }
+                });
+              }
+
+              // canvas 못 찾으면 다른 셀렉터 시도
+              if (!el) {
+                for (const sel of selectors) {
+                  const found = document.querySelector(sel);
+                  if (found) {
+                    const rect = found.getBoundingClientRect();
+                    if (rect.width > 200 && rect.height > 200) {
+                      el = found;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              if (!el) return null;
+
+              const rect = el.getBoundingClientRect();
+              return {
+                x: Math.round(rect.left * window.devicePixelRatio),
+                y: Math.round(rect.top * window.devicePixelRatio),
+                w: Math.round(rect.width * window.devicePixelRatio),
+                h: Math.round(rect.height * window.devicePixelRatio)
+              };
+            }
+          });
+          cropRect = result?.result || null;
+        } catch (e) {
+          console.warn('[SW] 영역 감지 실패, 전체 이미지 사용:', e);
+        }
+
+        // 4) 크롭이 필요하면 OffscreenCanvas로 자르기
+        if (cropRect && cropRect.w > 0 && cropRect.h > 0) {
+          const resp = await fetch(dataUrl);
+          const blob = await resp.blob();
+          const bmp = await createImageBitmap(blob);
+
+          // 범위 보정
+          const cx = Math.max(0, Math.min(cropRect.x, bmp.width - 1));
+          const cy = Math.max(0, Math.min(cropRect.y, bmp.height - 1));
+          const cw = Math.min(cropRect.w, bmp.width - cx);
+          const ch = Math.min(cropRect.h, bmp.height - cy);
+
+          const canvas = new OffscreenCanvas(cw, ch);
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(bmp, cx, cy, cw, ch, 0, 0, cw, ch);
+          bmp.close();
+
+          const croppedBlob = await canvas.convertToBlob({ type: 'image/png' });
+          const arrayBuf = await croppedBlob.arrayBuffer();
+          const bytes = new Uint8Array(arrayBuf);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const croppedDataUrl = 'data:image/png;base64,' + btoa(binary);
+
+          sendResponse({ success: true, dataUrl: croppedDataUrl });
+        } else {
+          // 크롭 실패 시 전체 이미지 반환
+          sendResponse({ success: true, dataUrl });
+        }
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
       }
-    });
+    })();
     return true;
   }
 
-  // APIYI 텍스트 생성 프록시
+  // APIYI 텍스트 생성 프록시 (Nano Banana 2)
   if (msg.action === 'apiyi_text') {
     fetchApiyiText(msg.prompt, msg.apiKey, msg.maxTokens)
       .then(text => sendResponse({ success: true, text }))
@@ -108,7 +249,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // APIYI 이미지 생성 프록시
+  // APIYI 이미지 생성 프록시 (Nano Banana 2)
   if (msg.action === 'apiyi_image') {
     fetchApiyiImage(msg.prompt, msg.apiKey, msg.referenceImages, msg.aspectRatio)
       .then(imageData => sendResponse({ success: true, imageData }))
@@ -160,6 +301,7 @@ async function fetchGimi9Region(type, code, token) {
 }
 
 async function fetchApiyiText(prompt, apiKey, maxTokens = 8192) {
+  // Nano Banana 2 텍스트 생성 (gemini-2.5-flash via APIYI)
   const url = 'https://vip.apiyi.com/v1beta/models/gemini-2.5-flash:generateContent';
   const resp = await fetch(url, {
     method: 'POST',
@@ -181,9 +323,11 @@ async function fetchApiyiText(prompt, apiKey, maxTokens = 8192) {
 }
 
 async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio = '9:16') {
+  // Nano Banana 2 이미지 생성 (gemini-3.1-flash-image-preview via APIYI)
   const url = 'https://api.apiyi.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent';
   const parts = [];
 
+  // 참조 이미지 (최대 2장)
   for (let i = 0; i < Math.min(referenceImages.length, 2); i++) {
     const img = referenceImages[i];
     if (img.startsWith('data:')) {
@@ -256,20 +400,12 @@ async function uploadToCloudinary(base64Image, folder = 'map2model') {
 }
 
 async function fetchNaverToken(clientId, clientSecret) {
-  const timestamp = Date.now();
-  // bcrypt 서명은 서버사이드에서 해야 하므로, 여기서는 간단한 HMAC 방식 사용
-  // 실제로는 bcrypt가 필요 — Cloudflare Worker 프록시 권장
-  const password = `${clientId}_${timestamp}`;
-  // Service Worker에서 bcrypt를 직접 실행할 수 없으므로
-  // client_secret_sign을 외부에서 받아야 합니다
   throw new Error('네이버 토큰 발급은 프록시 서버가 필요합니다. 설정에서 프록시 URL을 입력하세요.');
 }
 
 async function uploadNaverImage(token, imageUrl) {
-  // 네이버 상품 이미지 업로드 API
   const resp = await fetch(imageUrl);
   const blob = await resp.blob();
-
   const formData = new FormData();
   formData.append('imageFiles', blob, 'product.jpg');
 

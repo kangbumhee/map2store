@@ -13,47 +13,15 @@ class SmartStoreAPI {
 
   // ── 인증 토큰 발급 ──
   async authenticate() {
-    const timestamp = Date.now();
+    const timestamp = Date.now() - 3000; // 3초 보정 (서버와 동일)
+    const password = `${this.clientId}_${timestamp}`;
 
-    // bcrypt 서명 생성
-    // MV3 확장에서는 bcrypt를 직접 사용하기 어려우므로
-    // Cloudflare Worker 프록시를 통해 토큰을 발급받는 방식 권장
-    // 아래는 직접 호출 방식 (프록시 서버 필요)
-
-    // 방법 1: 직접 서명 (bcryptjs 라이브러리 필요)
-    // 방법 2: 프록시 서버 사용
-    // 여기서는 방법 2를 기본으로 구현
-
-    // 사용자가 설정한 프록시 URL이 있으면 사용, 없으면 직접 시도
-    const stored = await chrome.storage.local.get('naver_proxy_url');
-    const proxyUrl = stored.naver_proxy_url;
-
-    if (proxyUrl) {
-      // 프록시 서버를 통한 토큰 발급
-      const resp = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientId: this.clientId,
-          clientSecret: this.clientSecret,
-          timestamp: timestamp
-        })
-      });
-      if (!resp.ok) throw new Error(`프록시 토큰 발급 실패: ${resp.status}`);
-      const data = await resp.json();
-      this.accessToken = data.access_token;
-      this.tokenExpiry = Date.now() + (data.expires_in || 21600) * 1000;
-      return;
-    }
-
-    // 직접 bcrypt 서명 시도 (bcryptjs가 로드된 경우)
+    // bcryptjs 라이브러리 사용
     if (typeof dcodeIO !== 'undefined' && dcodeIO.bcrypt) {
       const bcrypt = dcodeIO.bcrypt;
-      const password = `${this.clientId}_${timestamp}`;
       const hashed = bcrypt.hashSync(password, this.clientSecret);
       const signature = btoa(hashed);
 
-      const tokenUrl = 'https://api.commerce.naver.com/external/v1/oauth2/token';
       const params = new URLSearchParams({
         client_id: this.clientId,
         timestamp: timestamp.toString(),
@@ -62,10 +30,13 @@ class SmartStoreAPI {
         type: 'SELF'
       });
 
-      const resp = await fetch(`${tokenUrl}?${params.toString()}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      });
+      const resp = await fetch(
+        `https://api.commerce.naver.com/external/v1/oauth2/token?${params.toString()}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        }
+      );
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -74,11 +45,11 @@ class SmartStoreAPI {
 
       const data = await resp.json();
       this.accessToken = data.access_token;
-      this.tokenExpiry = Date.now() + (data.expires_in || 21600) * 1000;
+      this.tokenExpiry = Date.now() + (data.expires_in || 10800) * 1000;
       return;
     }
 
-    throw new Error('네이버 토큰 발급 실패: bcrypt 라이브러리 또는 프록시 서버가 필요합니다. 설정에서 프록시 URL을 입력하세요.');
+    throw new Error('bcrypt 라이브러리 로드 실패. dashboard.html에 bcrypt.min.js가 포함되어야 합니다.');
   }
 
   // ── 토큰 유효성 확인 ──
