@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div id="panel-root">
+    <h3>🗺️ Map2Model 자동화</h3>
+
+    <div class="section">
+      <label>Gimi9 Token</label>
+      <div class="row">
+        <input type="text" id="token-input" placeholder="gimi9 토큰 입력">
+        <button id="token-save">저장</button>
+      </div>
+    </div>
+
+    <div class="tab-bar">
+      <button class="tab active" data-tab="hd">행정동</button>
+      <button class="tab" data-tab="ld">법정동</button>
+      <button class="tab" data-tab="preset">명소</button>
+    </div>
+
+    <div id="search-section" class="section">
+      <input type="text" id="search-input" placeholder="행정동 검색 (예: 장기동) — 복수 선택 가능">
+      <div id="results"></div>
+    </div>
+
+    <div id="preset-section" class="section" style="display:none">
+      <select id="preset-category"><option value="">-- 카테고리 선택 --</option></select>
+      <select id="preset-item" disabled><option value="">-- 장소 선택 --</option></select>
+      <p id="preset-desc" style="display:none"></p>
+    </div>
+
+    <div id="selected-list"></div>
+
+    <div id="selected-section" style="display:none">
+      <div id="selected-info"></div>
+      <div class="row" style="margin-top:6px">
+        <button id="start-btn">🚀 모델 생성 시작</button>
+      </div>
+      <div class="row">
+        <label class="checkbox-label"><input type="checkbox" id="auto-mesh"> 자동 메쉬</label>
+        <label class="checkbox-label" id="rect-row"><input type="checkbox" id="use-rect"> 직사각형 변환</label>
+      </div>
+    </div>
+
+    <div id="log"></div>
+  </div>
+
+  <script src="turf.min.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

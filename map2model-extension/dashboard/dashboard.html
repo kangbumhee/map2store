@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Map2Model + SmartStore 대시보드</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+
+  <!-- ===== 사이드바 ===== -->
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">🗺️</div>
+      <h1>Map2Model</h1>
+      <p class="version">v10.0</p>
+    </div>
+
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-page="map">
+        <span class="nav-icon">🌍</span>
+        <span class="nav-label">맵 생성</span>
+      </button>
+      <button class="nav-item" data-page="product">
+        <span class="nav-icon">🛍️</span>
+        <span class="nav-label">상품 등록</span>
+      </button>
+      <button class="nav-item" data-page="history">
+        <span class="nav-icon">📋</span>
+        <span class="nav-label">히스토리</span>
+      </button>
+      <button class="nav-item" data-page="settings">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-label">설정</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div id="status-indicator" class="status offline">
+        <span class="status-dot"></span>
+        <span class="status-text">map2model 미연결</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== 메인 영역 ===== -->
+  <main id="main">
+
+    <!-- ===== 페이지: 맵 생성 ===== -->
+    <section id="page-map" class="page active">
+      <header class="page-header">
+        <h2>🌍 맵 생성</h2>
+        <p>행정동/법정동/명소를 선택하여 3D 지형 모형을 생성합니다</p>
+      </header>
+
+      <div class="page-body two-col">
+        <!-- 좌: 검색 & 선택 -->
+        <div class="card">
+          <div class="card-header">
+            <h3>지역 선택</h3>
+          </div>
+          <div class="card-body">
+            <div class="map-tabs">
+              <button class="map-tab active" data-mtab="hd">행정동</button>
+              <button class="map-tab" data-mtab="ld">법정동</button>
+              <button class="map-tab" data-mtab="preset">명소</button>
+            </div>
+
+            <!-- 검색 (행정동/법정동) -->
+            <div id="map-search-area">
+              <div class="search-box">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="map-search" placeholder="동 이름 검색 (예: 성수동, 장기동)">
+              </div>
+              <div id="map-results" class="result-list"></div>
+            </div>
+
+            <!-- 프리셋 (명소) -->
+            <div id="map-preset-area" style="display:none">
+              <select id="map-preset-cat">
+                <option value="">카테고리 선택</option>
+              </select>
+              <select id="map-preset-item" disabled style="margin-top:8px">
+                <option value="">장소 선택</option>
+              </select>
+              <p id="map-preset-desc" class="preset-desc" style="display:none"></p>
+            </div>
+
+            <!-- 선택 목록 -->
+            <div id="map-selected-tags" class="selected-tags"></div>
+          </div>
+        </div>
+
+        <!-- 우: 설정 & 실행 -->
+        <div class="card">
+          <div class="card-header">
+            <h3>생성 설정</h3>
+          </div>
+          <div class="card-body">
+            <div id="map-selection-info" class="selection-info" style="display:none">
+              <div id="map-sel-name" class="sel-name"></div>
+              <div id="map-sel-detail" class="sel-detail"></div>
+            </div>
+
+            <div class="option-group">
+              <label class="toggle-label">
+                <input type="checkbox" id="map-auto-mesh">
+                <span class="toggle-switch"></span>
+                <span>자동 메쉬 생성</span>
+              </label>
+              <label class="toggle-label">
+                <input type="checkbox" id="map-use-rect">
+                <span class="toggle-switch"></span>
+                <span>직사각형으로 변환</span>
+              </label>
+            </div>
+
+            <button id="map-start-btn" class="btn-action" disabled>
+              🚀 모델 생성 시작
+            </button>
+
+            <div id="map-log" class="log-area"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 페이지: 상품 등록 ===== -->
+    <section id="page-product" class="page">
+      <header class="page-header">
+        <h2>🛍️ 상품 등록</h2>
+        <p>맵 캡처 → AI 상세페이지 생성 → 스마트스토어 자동 업로드</p>
+      </header>
+
+      <div class="page-body">
+        <!-- 파이프라인 단계 표시 -->
+        <div class="pipeline">
+          <div class="pipe-step active" data-step="1">
+            <div class="pipe-num">1</div>
+            <div class="pipe-label">맵 캡처</div>
+          </div>
+          <div class="pipe-line"></div>
+          <div class="pipe-step" data-step="2">
+            <div class="pipe-num">2</div>
+            <div class="pipe-label">상품 정보</div>
+          </div>
+          <div class="pipe-line"></div>
+          <div class="pipe-step" data-step="3">
+            <div class="pipe-num">3</div>
+            <div class="pipe-label">AI 생성</div>
+          </div>
+          <div class="pipe-line"></div>
+          <div class="pipe-step" data-step="4">
+            <div class="pipe-num">4</div>
+            <div class="pipe-label">미리보기</div>
+          </div>
+          <div class="pipe-line"></div>
+          <div class="pipe-step" data-step="5">
+            <div class="pipe-num">5</div>
+            <div class="pipe-label">업로드</div>
+          </div>
+        </div>
+
+        <!-- 풀오토 컨트롤 -->
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-body" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+            <button id="prod-auto-btn" class="btn-action-lg">⚡ 원클릭 자동 등록</button>
+            <div class="step-toggles">
+              <label class="mini-check"><input type="checkbox" id="chk-step1" checked> 캡처확인</label>
+              <label class="mini-check"><input type="checkbox" id="chk-step2" checked> 정보확인</label>
+              <label class="mini-check"><input type="checkbox" id="chk-step3" checked> AI확인</label>
+              <label class="mini-check"><input type="checkbox" id="chk-step4" checked> 미리보기</label>
+              <label class="mini-check"><input type="checkbox" id="chk-step5" checked> 업로드확인</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 1: 캡처 -->
+        <div class="card step-card" id="step1-card">
+          <div class="card-header"><h3>📷 Step 1 — 맵 캡처</h3></div>
+          <div class="card-body">
+            <p class="hint">map2model.com에서 현재 보이는 화면을 캡처합니다.</p>
+            <button id="prod-capture-btn" class="btn-secondary">📸 화면 캡처</button>
+            <div id="capture-preview-area" style="display:none;margin-top:12px">
+              <img id="capture-preview-img" src="" class="capture-preview">
+              <div class="btn-row" style="margin-top:8px">
+                <button id="capture-confirm" class="btn-green">✓ 확인</button>
+                <button id="capture-retry" class="btn-secondary">🔄 다시</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2: 상품 정보 -->
+        <div class="card step-card" id="step2-card" style="display:none">
+          <div class="card-header"><h3>📦 Step 2 — 상품 정보</h3></div>
+          <div class="card-body">
+            <div class="form-group">
+              <label>상품명</label>
+              <input type="text" id="prod-name" placeholder="예: 서울 성수동 3D 지형 모형 액자">
+            </div>
+            <div class="form-group">
+              <label>지역명 (자동 입력)</label>
+              <input type="text" id="prod-region" readonly class="readonly-input">
+            </div>
+            <div class="form-group">
+              <label>상품 설명 (AI가 자동 작성 — 직접 수정 가능)</label>
+              <textarea id="prod-desc" rows="4" placeholder="이 상품은 실제 지형 데이터를 기반으로 3D 프린팅한 세상에 하나뿐인 작품입니다..."></textarea>
+            </div>
+
+            <!-- 사이즈별 가격 -->
+            <div class="form-group">
+              <label>📐 사이즈별 가격</label>
+              <div id="size-list">
+                <div class="size-row">
+                  <input type="text" class="sz-label" value="S" placeholder="이름">
+                  <input type="number" class="sz-w" value="150" placeholder="가로mm">
+                  <span class="sz-x">×</span>
+                  <input type="number" class="sz-h" value="100" placeholder="세로mm">
+                  <input type="number" class="sz-price" value="59000" placeholder="원">
+                  <button class="btn-del-sz">✕</button>
+                </div>
+                <div class="size-row">
+                  <input type="text" class="sz-label" value="M" placeholder="이름">
+                  <input type="number" class="sz-w" value="250" placeholder="가로mm">
+                  <span class="sz-x">×</span>
+                  <input type="number" class="sz-h" value="150" placeholder="세로mm">
+                  <input type="number" class="sz-price" value="90000" placeholder="원">
+                  <button class="btn-del-sz">✕</button>
+                </div>
+                <div class="size-row">
+                  <input type="text" class="sz-label" value="L" placeholder="이름">
+                  <input type="number" class="sz-w" value="400" placeholder="가로mm">
+                  <span class="sz-x">×</span>
+                  <input type="number" class="sz-h" value="250" placeholder="세로mm">
+                  <input type="number" class="sz-price" value="150000" placeholder="원">
+                  <button class="btn-del-sz">✕</button>
+                </div>
+              </div>
+              <button id="add-size-btn" class="btn-secondary" style="margin-top:6px">+ 사이즈 추가</button>
+            </div>
+
+            <!-- 추가 이미지 -->
+            <div class="form-group">
+              <label>📸 추가 이미지 (실물 사진, 액자 사진 등)</label>
+              <div class="file-drop" id="extra-drop">
+                <input type="file" id="extra-file" multiple accept="image/*" style="display:none">
+                <p>이미지를 드래그하거나 클릭하여 추가</p>
+              </div>
+              <div id="extra-thumbs" class="thumb-grid"></div>
+            </div>
+
+            <button id="step2-next" class="btn-green">다음 단계 →</button>
+          </div>
+        </div>
+
+        <!-- Step 3: AI 생성 -->
+        <div class="card step-card" id="step3-card" style="display:none">
+          <div class="card-header"><h3>🤖 Step 3 — AI 상세페이지 생성</h3></div>
+          <div class="card-body">
+            <div id="ai-gen-progress">
+              <div class="progress-bar">
+                <div class="progress-fill" id="ai-progress-bar" style="width:0%"></div>
+              </div>
+              <p id="ai-progress-text">대기 중...</p>
+            </div>
+            <div id="ai-gen-result" style="display:none">
+              <div id="ai-sections" class="ai-sections-grid"></div>
+              <div class="btn-row" style="margin-top:12px">
+                <button id="ai-regen-btn" class="btn-secondary">🔄 다시 생성</button>
+                <button id="ai-confirm-btn" class="btn-green">✓ 확인</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 4: 미리보기 -->
+        <div class="card step-card" id="step4-card" style="display:none">
+          <div class="card-header"><h3>👁️ Step 4 — 최종 미리보기</h3></div>
+          <div class="card-body">
+            <div id="preview-area" class="preview-scroll"></div>
+            <button id="preview-confirm" class="btn-green" style="margin-top:12px">업로드 진행 →</button>
+          </div>
+        </div>
+
+        <!-- Step 5: 업로드 -->
+        <div class="card step-card" id="step5-card" style="display:none">
+          <div class="card-header"><h3>🚀 Step 5 — 스마트스토어 업로드</h3></div>
+          <div class="card-body">
+            <div id="upload-status">
+              <p id="upload-msg">준비 중...</p>
+              <div class="progress-bar"><div class="progress-fill" id="upload-bar" style="width:0%"></div></div>
+            </div>
+            <div id="upload-done" style="display:none">
+              <div class="success-box">
+                <span class="success-icon">✅</span>
+                <h4>상품 등록 완료!</h4>
+                <a id="product-url" href="#" target="_blank" class="product-link">스마트스토어에서 보기 →</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 로그 -->
+        <div class="card" style="margin-top:16px">
+          <div class="card-header"><h3>📝 로그</h3></div>
+          <div class="card-body">
+            <div id="prod-log" class="log-area"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 페이지: 히스토리 ===== -->
+    <section id="page-history" class="page">
+      <header class="page-header">
+        <h2>📋 히스토리</h2>
+        <p>이전에 생성한 상품 목록</p>
+      </header>
+      <div class="page-body">
+        <div id="history-grid" class="history-grid">
+          <p class="empty-state">아직 생성된 상품이 없습니다</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 페이지: 설정 ===== -->
+    <section id="page-settings" class="page">
+      <header class="page-header">
+        <h2>⚙️ 설정</h2>
+        <p>API 키 및 계정 정보를 관리합니다</p>
+      </header>
+      <div class="page-body" style="max-width:600px">
+        <div class="card">
+          <div class="card-header"><h3>🔑 API 키</h3></div>
+          <div class="card-body">
+            <div class="form-group">
+              <label>Gimi9 Token (지오코딩)</label>
+              <input type="text" id="set-gimi9" placeholder="gimi9 토큰">
+            </div>
+            <div class="form-group">
+              <label>Nano Banana API Key (AI 생성)</label>
+              <input type="password" id="set-apiyi" placeholder="APIYI API 키">
+              <p class="hint">api.apiyi.com에서 발급 — 이미지 1장당 약 68원</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-header"><h3>🏪 네이버 커머스 API</h3></div>
+          <div class="card-body">
+            <div class="form-group">
+              <label>Client ID (앱 ID)</label>
+              <input type="text" id="set-naver-id" placeholder="커머스 API 앱 ID">
+            </div>
+            <div class="form-group">
+              <label>Client Secret (앱 시크릿)</label>
+              <input type="password" id="set-naver-secret" placeholder="$2a$04$...">
+            </div>
+            <p class="hint">apicenter.commerce.naver.com에서 발급</p>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-header"><h3>🏷️ 기본 상품 설정</h3></div>
+          <div class="card-body">
+            <div class="form-group">
+              <label>기본 카테고리 ID</label>
+              <input type="text" id="set-category-id" placeholder="예: 50000803">
+            </div>
+            <div class="form-group">
+              <label>반품/교환 안내</label>
+              <textarea id="set-return-info" rows="3" placeholder="반품/교환 정책을 입력하세요"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <button id="save-all-settings" class="btn-action" style="margin-top:16px;width:100%">💾 전체 설정 저장</button>
+        <div id="settings-saved" class="save-toast" style="display:none">✅ 저장 완료!</div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="dashboard.js"></script>
+  <script src="smartstore.js"></script>
+</body>
+</html>

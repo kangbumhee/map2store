@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Map2Model + SmartStore",
+  "version": "10.0",
+  "description": "3D 지형 맵 생성 → AI 상세페이지 → 스마트스토어 자동 등록",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://map2model.com/*",
+    "https://geocode-api.gimi9.com/*",
+    "https://vip.apiyi.com/*",
+    "https://api.commerce.naver.com/*",
+    "https://api.cloudinary.com/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://map2model.com/*"],
+      "js": ["content/content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/page-script.js",
+        "panel/panel.html",
+        "panel/panel.css",
+        "panel/panel.js",
+        "panel/turf.min.js",
+        "data/dong-list.json",
+        "data/legal-dong-list.json",
+        "data/presets.json",
+        "dashboard/dashboard.html",
+        "dashboard/dashboard.css",
+        "dashboard/dashboard.js",
+        "dashboard/smartstore.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "action": {
+    "default_title": "Map2Model + SmartStore 대시보드"
+  }
+}
