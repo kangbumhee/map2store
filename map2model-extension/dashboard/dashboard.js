@@ -319,8 +319,12 @@
       sendPolygon(coords, name, autoMesh, true);
       if ($('prod-region-auto')?.checked) {
         $('prod-region').value = name;
-        const defaultSize = '250×174mm';
-        $('prod-name').value = `${name} 3D 지형 모형 액자 (${defaultSize})`;
+        const calcSize = calcSizeFromBounds(sw, ne);
+        $('prod-name').value = `${name} 3D 지형 모형 액자 (${calcSize.label})`;
+        $('size-list').innerHTML = '';
+        addSizeRowWithData('기본', calcSize.w, calcSize.h, 90000);
+        $('size-auto-info').style.display = 'block';
+        $('size-auto-text').innerHTML = `좌표 기반: ${calcSize.widthM.toFixed(0)}×${calcSize.heightM.toFixed(0)}m → <strong>${calcSize.label}</strong>`;
       }
       return;
     }
@@ -372,8 +376,16 @@
     // 상품 페이지에 지역명 전달 (체크박스가 체크되어 있을 때만)
     if ($('prod-region-auto')?.checked) {
       $('prod-region').value = names;
-      const defaultSize = '250×174mm';
-      $('prod-name').value = `${names} 3D 지형 모형 액자 (${defaultSize})`;
+      const allLats = finalCoords.map(c => c[0]);
+      const allLngs = finalCoords.map(c => c[1]);
+      const bSw = [Math.min(...allLats), Math.min(...allLngs)];
+      const bNe = [Math.max(...allLats), Math.max(...allLngs)];
+      const calcSize = calcSizeFromBounds(bSw, bNe);
+      $('prod-name').value = `${names} 3D 지형 모형 액자 (${calcSize.label})`;
+      $('size-list').innerHTML = '';
+      addSizeRowWithData('기본', calcSize.w, calcSize.h, 90000);
+      $('size-auto-info').style.display = 'block';
+      $('size-auto-text').innerHTML = `좌표 기반: ${calcSize.widthM.toFixed(0)}×${calcSize.heightM.toFixed(0)}m → <strong>${calcSize.label}</strong>`;
     }
   }
 
@@ -505,7 +517,10 @@
       $('capture-preview-img').src = resp.dataUrl;
       $('capture-preview-area').style.display = 'block';
       prodLog('✅ 캡처 완료!', 'ok');
-      autoCalculateSize();
+      const existingSizes = getSizes();
+      if (existingSizes.length === 0) {
+        autoCalculateSize();
+      }
     } else {
       prodLog(`❌ 캡처 실패: ${resp.error}. map2model.com을 먼저 열어주세요.`, 'err');
     }
@@ -535,6 +550,37 @@
       <input type="number" class="sz-price" value="${price}" placeholder="원">
       <button class="btn-del-sz">✕</button>`;
     $('size-list').appendChild(row);
+  }
+
+  // ── 좌표 기반 실제 사이즈 계산 ──
+  function calcSizeFromBounds(sw, ne) {
+    function haversine(lat1, lng1, lat2, lng2) {
+      const R = 6371000;
+      const toRad = d => d * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLng = toRad(lng2 - lng1);
+      const a = Math.sin(dLat / 2) ** 2 +
+                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+                Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+    const midLat = (sw[0] + ne[0]) / 2;
+    const widthM = haversine(midLat, sw[1], midLat, ne[1]);
+    const heightM = haversine(sw[0], (sw[1] + ne[1]) / 2, ne[0], (sw[1] + ne[1]) / 2);
+    const ratio = widthM / heightM;
+
+    const longSide = 250;
+    let w;
+    let h;
+    if (ratio >= 1) {
+      w = longSide;
+      h = Math.round(longSide / ratio);
+    } else {
+      h = longSide;
+      w = Math.round(longSide * ratio);
+    }
+
+    return { w, h, label: `${w}×${h}mm`, ratio, widthM, heightM };
   }
 
   function autoCalculateSize() {
@@ -720,6 +766,12 @@
       // 사이즈 텍스트
       const sizesText = sizes.map(s => `${s.label}: ${s.width}×${s.height}mm — ${s.price.toLocaleString()}원`).join('\n');
       const sizeInfo = sizes.length > 0 ? `${sizes[0].width}×${sizes[0].height}mm` : '250×174mm';
+      let sectionAspectRatio = '16:9';
+      if (sizes.length > 0) {
+        const sr = sizes[0].width / sizes[0].height;
+        sectionAspectRatio = sr > 1.3 ? '16:9' : sr > 0.8 ? '1:1' : '9:16';
+        prodLog(`📐 사이즈 비율 ${sr.toFixed(2)} → 섹션 이미지: ${sectionAspectRatio}`);
+      }
       const naverKeywords = await fetchNaverKeywords(prodRegion);
       prodLog(`🔍 네이버 연관키워드 ${naverKeywords.length}개 수집`);
 
@@ -788,7 +840,7 @@ JSON 형태로:
       "title": "섹션 제목",
       "keyMessage": "메인 카피",
       "subMessage": "보조 카피",
-      "visualPrompt": "English prompt for 9:16 vertical product image"
+      "visualPrompt": "English prompt describing the SCENE/SETTING only (desk, wall, close-up etc). Do NOT describe the terrain — it comes from a reference image. Mention product is a small 250mm framed model if furniture is present."
     }
   ],
   "productCopy": {
@@ -901,26 +953,28 @@ JSON만 출력해.`;
         async function generateSectionImage(section) {
           const sectionRefImages = [];
           if (hasSamples) sectionRefImages.push(state.sampleImages[0]);
-          if (heroImage) sectionRefImages.push(heroImage);
-          else if (hasCapture) sectionRefImages.push(state.capturedImage);
+          if (hasCapture) sectionRefImages.push(state.capturedImage);
 
-          const fullPrompt = `You are given reference image(s) of a real 3D printed terrain model product in a black frame.
+          const fullPrompt = `You are given two reference images:
+- Image 1: A real product photo showing the BLACK FRAME STYLE and MATERIAL FINISH only. Do NOT copy the terrain/map from this image.
+- Image 2: A 3D terrain map rendering. You MUST reproduce EXACTLY this terrain geography inside the frame — the specific coastline, river paths, road network, and building positions.
 
 ${section.visualPrompt}
 
-IMPORTANT RULES:
-- The product is a 3D printed terrain relief model (${sizeInfo}) in a black frame
-- Maintain the EXACT same frame style and product appearance from the reference
+CRITICAL RULES:
+- The terrain INSIDE the frame must come from Image 2 ONLY, never from Image 1
+- Frame style (black wood, raised edges) from Image 1
+- Product is a SMALL 3D printed terrain relief model (${sizeInfo}), about the size of a paperback book
+- If furniture is in the scene, the product must appear SMALL relative to it
 - Photorealistic product photography only
 - No text, no watermarks, no fantasy elements
-- 9:16 vertical format
 - Must look like the same product photographed in different settings/angles`;
 
           try {
             const resp = await chrome.runtime.sendMessage({
               action: 'apiyi_image',
               prompt: fullPrompt,
-              apiKey, referenceImages: sectionRefImages.slice(0, 2), aspectRatio: '9:16'
+              apiKey, referenceImages: sectionRefImages.slice(0, 2), aspectRatio: sectionAspectRatio
             });
             done++;
             updateAIProgress(35 + Math.round((done / total) * 55), `이미지 ${done}/${total} 완료`);
