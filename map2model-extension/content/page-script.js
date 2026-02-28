@@ -4,7 +4,11 @@
 // ========================================
 
 (function() {
-  if (window.__m2m_initialized) return;
+  // 재주입 시 이전 핸들러 제거 후 새 버전으로 교체
+  if (window.__m2m_drawHandler) {
+    window.removeEventListener('message', window.__m2m_drawHandler);
+    console.log('[M2M] ♻️ 이전 핸들러 제거, 새 버전으로 교체');
+  }
   window.__m2m_initialized = true;
 
   function captureMap() {
@@ -88,7 +92,7 @@
     return false; // 이미 Map Preview 상태
   }
 
-  window.addEventListener('message', async (e) => {
+  window.__m2m_drawHandler = async function(e) {
     if (e.data?.type !== 'M2M_DRAW_POLYGON') return;
 
     const coords = e.data.coords;
@@ -211,7 +215,8 @@
     } catch (err) {
       sendStatus(`❌ 오류: ${err.message}`, true);
     }
-  });
+  };
+  window.addEventListener('message', window.__m2m_drawHandler);
 
   captureMap();
 

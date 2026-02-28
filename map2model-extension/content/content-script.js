@@ -12,7 +12,7 @@ if (window.__m2m_content_loaded) {
   if (!document.getElementById('m2m-page-script')) {
     const s = document.createElement('script');
     s.id = 'm2m-page-script';
-    s.src = chrome.runtime.getURL('content/page-script.js');
+    s.src = `${chrome.runtime.getURL('content/page-script.js')}?v=${Date.now()}`;
     document.documentElement.appendChild(s);
   }
 
