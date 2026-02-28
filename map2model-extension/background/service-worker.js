@@ -330,42 +330,41 @@ async function fetchApiyiText(prompt, apiKey, maxTokens = 8192) {
 }
 
 async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio = '9:16') {
-  // Nano Banana 2 이미지 생성 (gemini-3.1-flash-image-preview via APIYI)
-  const url = 'https://api.apiyi.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent';
+  // btktool-apiyi와 동일: gemini-3-pro-image-preview-4k, vip.apiyi.com
+  const modelName = 'gemini-3-pro-image-preview-4k';
+  const url = `https://vip.apiyi.com/v1beta/models/${modelName}:generateContent`;
   const parts = [];
 
-  // 참조 이미지 (최대 2장)
-  for (let i = 0; i < Math.min(referenceImages.length, 2); i++) {
+  // 참조 이미지 (최대 3장) — snake_case 사용
+  const maxRef = Math.min(referenceImages.length, 3);
+  for (let i = 0; i < maxRef; i++) {
     const img = referenceImages[i];
     if (img.startsWith('data:')) {
       const match = img.match(/^data:image\/([a-z+]+);base64,(.+)$/);
       if (match) {
-        parts.push({ inlineData: { mimeType: `image/${match[1]}`, data: match[2] } });
+        parts.push({ inline_data: { mime_type: `image/${match[1]}`, data: match[2] } });
       }
     }
   }
   parts.push({ text: prompt });
 
   const body = JSON.stringify({
-    contents: [{ parts }],
+    contents: [{ role: 'user', parts }],
     generationConfig: {
       responseModalities: ['IMAGE'],
-      imageConfig: {
-        aspectRatio: aspectRatio,
-        imageSize: '4K'
-      }
+      resolution: '4K',
+      aspectRatio: aspectRatio
     }
   });
 
-  // 최대 3회 재시도, 타임아웃 300초
+  // 최대 3회 재시도, 타임아웃 90초
   const MAX_RETRIES = 3;
-  const TIMEOUT_MS = 300000;
+  const TIMEOUT_MS = 90000;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    let timeoutId = null;
     try {
       const controller = new AbortController();
-      timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
       const resp = await fetch(url, {
         method: 'POST',
@@ -376,13 +375,11 @@ async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio
         body: body,
         signal: controller.signal
       });
-
       clearTimeout(timeoutId);
-      timeoutId = null;
 
       if (resp.status === 429) {
         const waitSec = 10 * attempt;
-        console.warn(`[SW] 이미지 생성 429 Rate Limit, ${waitSec}초 대기 후 재시도 (${attempt}/${MAX_RETRIES})`);
+        console.warn(`[SW] 이미지 생성 429 Rate Limit, ${waitSec}초 대기 (${attempt}/${MAX_RETRIES})`);
         await new Promise(r => setTimeout(r, waitSec * 1000));
         continue;
       }
@@ -390,8 +387,8 @@ async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
         const errMsg = err.error?.message || `HTTP ${resp.status}`;
-        if (attempt < MAX_RETRIES && (resp.status >= 500 || resp.status === 503)) {
-          console.warn(`[SW] 이미지 생성 ${resp.status}, 재시도 ${attempt}/${MAX_RETRIES}`);
+        if (attempt < MAX_RETRIES && resp.status >= 500) {
+          console.warn(`[SW] ${resp.status}, 재시도 ${attempt}/${MAX_RETRIES}`);
           await new Promise(r => setTimeout(r, 5000 * attempt));
           continue;
         }
@@ -409,21 +406,17 @@ async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio
       }
       throw new Error('이미지 생성 응답에 이미지 데이터 없음');
     } catch (e) {
-      if (timeoutId) clearTimeout(timeoutId);
       if (e.name === 'AbortError') {
         if (attempt < MAX_RETRIES) {
-          console.warn(`[SW] 이미지 생성 타임아웃, 재시도 ${attempt}/${MAX_RETRIES}`);
+          console.warn(`[SW] 타임아웃, 재시도 ${attempt}/${MAX_RETRIES}`);
           continue;
         }
         throw new Error(`이미지 생성 타임아웃 (${TIMEOUT_MS / 1000}초 × ${MAX_RETRIES}회)`);
       }
       if (attempt >= MAX_RETRIES) throw e;
-      console.warn(`[SW] 이미지 생성 오류, 재시도 ${attempt}/${MAX_RETRIES}: ${e.message}`);
       await new Promise(r => setTimeout(r, 3000 * attempt));
     }
   }
-
-  throw new Error('이미지 생성 재시도 횟수 초과');
 }
 
 async function uploadToCloudinary(base64Image, folder = 'map2model') {

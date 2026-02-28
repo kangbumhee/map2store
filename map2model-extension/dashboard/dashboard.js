@@ -684,17 +684,19 @@
     $('ai-gen-result').style.display = 'none';
     $('ai-gen-progress').style.display = 'block';
     updateAIProgress(0, '시작...');
-    // AI 생성 경과 시간 타이머
+    // AI 생성 경과 시간 타이머 (별도 표시)
     const timerStartTime = Date.now();
+    const elapsedEl = $('ai-elapsed-time');
+    if (elapsedEl) {
+      elapsedEl.style.display = 'block';
+      elapsedEl.textContent = '⏱️ 경과 시간: 0초';
+    }
     const timerInterval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - timerStartTime) / 1000);
-      const min = Math.floor(elapsed / 60);
-      const sec = elapsed % 60;
-      const timeStr = min > 0 ? `${min}분 ${sec}초` : `${sec}초`;
-      const progressText = $('ai-progress-text');
-      if (progressText && progressText.textContent) {
-        const baseText = progressText.textContent.replace(/\s*\(.*?\)\s*$/, '');
-        progressText.textContent = `${baseText} (${timeStr} 경과)`;
+      const sec = Math.floor((Date.now() - timerStartTime) / 1000);
+      const min = Math.floor(sec / 60);
+      const s = sec % 60;
+      if (elapsedEl) {
+        elapsedEl.textContent = `⏱️ 경과 시간: ${min > 0 ? `${min}분 ` : ''}${s}초`;
       }
     }, 1000);
 
@@ -922,6 +924,8 @@ Strict: No fantasy elements. No added accessories. Must look like the same produ
     } finally {
       _aiGenerating = false;
       clearInterval(timerInterval);
+      const elapsedEl = $('ai-elapsed-time');
+      if (elapsedEl) elapsedEl.style.display = 'none';
     }
   }
 
