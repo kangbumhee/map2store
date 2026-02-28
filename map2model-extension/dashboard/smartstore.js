@@ -167,7 +167,7 @@ class SmartStoreAPI {
         metaDescription: description?.substring(0, 150) || name
       },
       purchaseQuantityInfo: {
-        minPurchaseQuantity: 1,
+        minPurchaseQuantity: 0,
         maxPurchaseQuantity: 0
       }
     };

@@ -400,6 +400,13 @@
       handleSampleFiles(e.dataTransfer.files);
     });
     sampleFile.addEventListener('change', () => handleSampleFiles(sampleFile.files));
+    chrome.storage.local.get('saved_sample_images', (saved) => {
+      if (saved.saved_sample_images && saved.saved_sample_images.length > 0) {
+        state.sampleImages = saved.saved_sample_images;
+        renderSampleThumbs();
+        prodLog(`📸 저장된 샘플 사진 ${state.sampleImages.length}장 로드`);
+      }
+    });
 
     // 추가 이미지
     const drop = $('extra-drop');
@@ -551,6 +558,7 @@
       reader.onload = (e) => {
         state.sampleImages.push(e.target.result);
         renderSampleThumbs();
+        chrome.storage.local.set({ saved_sample_images: state.sampleImages });
         prodLog(`📸 샘플 사진 추가 (${state.sampleImages.length}/3)`);
       };
       reader.readAsDataURL(file);
@@ -568,6 +576,7 @@
       btn.addEventListener('click', () => {
         state.sampleImages.splice(parseInt(btn.dataset.sidx, 10), 1);
         renderSampleThumbs();
+        chrome.storage.local.set({ saved_sample_images: state.sampleImages });
       });
     });
   }
@@ -745,7 +754,7 @@ JSON 형태로:
     "catchphrase": "캐치프레이즈",
     "headline": "헤드라인",
     "description": "상세 설명 200자 이상",
-    "specs": [{"label": "소재", "value": "PLA 친환경 소재 + 원목 프레임"}, ...],
+    "specs": [{"label": "소재", "value": "PLA 친환경 소재"}, ...],
     "faq": [{"question": "질문", "answer": "답변"}, ...]
   }
 }
@@ -1001,13 +1010,50 @@ Strict: No fantasy elements. No added accessories. Must look like the same produ
       await api.authenticate();
       prodLog('✅ 네이버 인증 성공');
 
-      // 이미지 URL 수집 (Cloudinary URL)
-      const imageUrls = state.aiSections
-        .filter(s => s.imageUrl && s.imageUrl.startsWith('http'))
-        .map(s => s.imageUrl);
-      state.extraImages.forEach(img => {
-        if (img.startsWith('http')) imageUrls.push(img);
-      });
+      // 이미지 URL 수집 (base64면 Cloudinary 업로드 후 URL로 교체)
+      const imageUrls = [];
+      for (const sec of state.aiSections) {
+        if (!sec.imageUrl) continue;
+        if (sec.imageUrl.startsWith('http')) {
+          imageUrls.push(sec.imageUrl);
+        } else if (sec.imageUrl.startsWith('data:')) {
+          try {
+            prodLog('☁️ base64 이미지 Cloudinary 업로드 중...');
+            const uploadResp = await chrome.runtime.sendMessage({
+              action: 'cloudinary_upload',
+              base64: sec.imageUrl,
+              folder: 'map2model-products'
+            });
+            if (uploadResp.success) {
+              imageUrls.push(uploadResp.url);
+              sec.imageUrl = uploadResp.url;
+            }
+          } catch (e) {
+            prodLog(`⚠️ Cloudinary 업로드 실패: ${e.message}`);
+          }
+        }
+      }
+      for (const img of state.extraImages) {
+        if (img.startsWith('http')) {
+          imageUrls.push(img);
+        } else if (img.startsWith('data:')) {
+          try {
+            const uploadResp = await chrome.runtime.sendMessage({
+              action: 'cloudinary_upload',
+              base64: img,
+              folder: 'map2model-products'
+            });
+            if (uploadResp.success) imageUrls.push(uploadResp.url);
+          } catch (e) {
+            // 개별 추가 이미지 실패는 전체 업로드를 중단하지 않음
+          }
+        }
+      }
+
+      if (imageUrls.length === 0) {
+        prodLog('❌ 업로드할 이미지가 없습니다. AI 생성을 다시 실행해주세요.', 'err');
+        return;
+      }
 
       // 네이버 이미지 호스팅 업로드
       prodLog(`📸 ${imageUrls.length}개 이미지 네이버 업로드 중...`);
@@ -1020,6 +1066,7 @@ Strict: No fantasy elements. No added accessories. Must look like the same produ
       const prodName = $('prod-name').value.trim() || '3D 지형 모형 액자';
       const prodDesc = $('prod-desc').value.trim();
       const sizes = getSizes();
+      renderPreview();
       const detailHtml = buildDetailHtml();
 
       const productData = api.buildProductData({

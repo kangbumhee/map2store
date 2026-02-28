@@ -247,6 +247,20 @@
               <div id="extra-thumbs" class="thumb-grid"></div>
             </div>
 
+            <div class="form-group" id="section-select-area" style="display:none;margin-top:8px">
+              <label>📋 생성할 섹션 선택</label>
+              <div id="section-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="0" checked> 1.후킹(대표)</label>
+                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="1" checked> 2.제품상세</label>
+                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="2"> 3.사이즈</label>
+                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="3"> 4.라이프스타일</label>
+                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="4"> 5.제작과정</label>
+                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="5"> 6.차별점</label>
+                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="6"> 7.신뢰</label>
+              </div>
+              <p class="hint">체크된 섹션만 이미지를 생성합니다. 슬라이더 값과 연동됩니다.</p>
+            </div>
+
             <button id="step2-next" class="btn-green">다음 단계 →</button>
           </div>
         </div>
@@ -264,20 +278,6 @@
               </div>
               <p class="hint">0 = 텍스트 기획만 (이미지 생성 없음) · 테스트 시 1~2개 권장 · 비용: <span id="ai-cost-estimate">약 $0.04</span></p>
             </div>
-            <div class="form-group" id="section-select-area" style="display:none;margin-top:8px">
-              <label>📋 생성할 섹션 선택</label>
-              <div id="section-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
-                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="0" checked> 1.후킹(대표)</label>
-                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="1" checked> 2.제품상세</label>
-                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="2"> 3.사이즈</label>
-                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="3"> 4.라이프스타일</label>
-                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="4"> 5.제작과정</label>
-                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="5"> 6.차별점</label>
-                <label class="mini-check"><input type="checkbox" class="sec-chk" data-sec="6"> 7.신뢰</label>
-              </div>
-              <p class="hint">체크된 섹션만 이미지를 생성합니다. 슬라이더 값과 연동됩니다.</p>
-            </div>
-
             <div id="ai-gen-progress">
               <div class="progress-bar">
                 <div class="progress-fill" id="ai-progress-bar" style="width:0%"></div>
