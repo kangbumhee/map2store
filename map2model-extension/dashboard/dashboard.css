@@ -325,6 +325,10 @@ body {
   height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple));
   border-radius: 4px; transition: width 0.3s;
 }
+#ai-progress-text {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
 
 /* ── AI 섹션 ── */
 .ai-sections-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }

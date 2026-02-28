@@ -8,7 +8,7 @@
 
   // ── 상태 ──
   const state = {
-    mapTab: 'hd',
+    mapTab: 'preset',
     hdList: [],
     ldList: [],
     presets: [],
@@ -118,9 +118,10 @@
 
   // ========== 맵 페이지 ==========
   function setupMapPage() {
-    // 초기 상태: 검색 영역 표시, 프리셋 숨김
-    $('map-search-area').style.display = 'block';
-    $('map-preset-area').style.display = 'none';
+    // 초기 상태: 명소 탭이 기본
+    state.mapTab = 'preset';
+    $('map-search-area').style.display = 'none';
+    $('map-preset-area').style.display = 'block';
 
     // 탭
     document.querySelectorAll('.map-tab').forEach(tab => {
@@ -257,6 +258,7 @@
     catSel.addEventListener('change', () => {
       const idx = catSel.value;
       itemSel.innerHTML = '<option value="">장소 선택</option>';
+      itemSel.size = 1;
       $('map-preset-desc').style.display = 'none';
       state.selectedPreset = null;
       updateSelInfo();
@@ -268,6 +270,20 @@
         itemSel.appendChild(o);
       });
       itemSel.disabled = false;
+      // 카테고리 선택 시 아이템 셀렉트 자동 포커스 + 드롭다운 열기
+      setTimeout(() => {
+        itemSel.focus();
+        itemSel.click();
+        itemSel.size = Math.min(cat.items.length + 1, 10);
+        itemSel.addEventListener('change', function onceClose() {
+          itemSel.size = 1;
+          itemSel.removeEventListener('change', onceClose);
+        }, { once: true });
+        itemSel.addEventListener('blur', function onceBlur() {
+          itemSel.size = 1;
+          itemSel.removeEventListener('blur', onceBlur);
+        }, { once: true });
+      }, 50);
     });
 
     itemSel.addEventListener('change', () => {
@@ -668,6 +684,19 @@
     $('ai-gen-result').style.display = 'none';
     $('ai-gen-progress').style.display = 'block';
     updateAIProgress(0, '시작...');
+    // AI 생성 경과 시간 타이머
+    const timerStartTime = Date.now();
+    const timerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - timerStartTime) / 1000);
+      const min = Math.floor(elapsed / 60);
+      const sec = elapsed % 60;
+      const timeStr = min > 0 ? `${min}분 ${sec}초` : `${sec}초`;
+      const progressText = $('ai-progress-text');
+      if (progressText && progressText.textContent) {
+        const baseText = progressText.textContent.replace(/\s*\(.*?\)\s*$/, '');
+        progressText.textContent = `${baseText} (${timeStr} 경과)`;
+      }
+    }, 1000);
 
     try {
       const generateHero = checkedSections.includes(0) && hasCapture;
@@ -892,6 +921,7 @@ Strict: No fantasy elements. No added accessories. Must look like the same produ
       updateAIProgress(0, '실패');
     } finally {
       _aiGenerating = false;
+      clearInterval(timerInterval);
     }
   }
 
@@ -1047,6 +1077,24 @@ Strict: No fantasy elements. No added accessories. Must look like the same produ
           } catch (e) {
             // 개별 추가 이미지 실패는 전체 업로드를 중단하지 않음
           }
+        }
+      }
+
+      // 캡처 이미지도 추가
+      if (state.capturedImage) {
+        if (state.capturedImage.startsWith('data:')) {
+          try {
+            const resp = await chrome.runtime.sendMessage({
+              action: 'cloudinary_upload',
+              base64: state.capturedImage,
+              folder: 'map2model-products'
+            });
+            if (resp.success) imageUrls.push(resp.url);
+          } catch (e) {
+            // 캡처 이미지 단건 실패는 전체 업로드를 중단하지 않음
+          }
+        } else {
+          imageUrls.push(state.capturedImage);
         }
       }
 

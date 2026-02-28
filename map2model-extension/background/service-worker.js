@@ -303,6 +303,9 @@ async function fetchGimi9Region(type, code, token) {
 async function fetchApiyiText(prompt, apiKey, maxTokens = 8192) {
   // Nano Banana 2 텍스트 생성 (gemini-2.5-flash via APIYI)
   const url = 'https://vip.apiyi.com/v1beta/models/gemini-2.5-flash:generateContent';
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
+
   const resp = await fetch(url, {
     method: 'POST',
     headers: {
@@ -312,8 +315,12 @@ async function fetchApiyiText(prompt, apiKey, maxTokens = 8192) {
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.7, maxOutputTokens: maxTokens }
-    })
+    }),
+    signal: controller.signal
   });
+
+  clearTimeout(timeoutId);
+
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
     throw new Error(err.error?.message || `HTTP ${resp.status}`);
@@ -339,40 +346,84 @@ async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio
   }
   parts.push({ text: prompt });
 
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: {
-        responseModalities: ['IMAGE'],
-        imageConfig: {
-          aspectRatio: aspectRatio,
-          imageSize: '4K'
-        }
+  const body = JSON.stringify({
+    contents: [{ parts }],
+    generationConfig: {
+      responseModalities: ['IMAGE'],
+      imageConfig: {
+        aspectRatio: aspectRatio,
+        imageSize: '4K'
       }
-    }),
-    signal: AbortSignal.timeout(120000)
+    }
   });
 
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.error?.message || `HTTP ${resp.status}`);
-  }
+  // 최대 3회 재시도, 타임아웃 300초
+  const MAX_RETRIES = 3;
+  const TIMEOUT_MS = 300000;
 
-  const data = await resp.json();
-  const contentParts = data.candidates?.[0]?.content?.parts || [];
-  for (const part of contentParts) {
-    const inlineData = part.inlineData || part.inline_data;
-    if (inlineData?.data) {
-      const mimeType = inlineData.mimeType || inlineData.mime_type || 'image/png';
-      return `data:${mimeType};base64,${inlineData.data}`;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    let timeoutId = null;
+    try {
+      const controller = new AbortController();
+      timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: body,
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+      timeoutId = null;
+
+      if (resp.status === 429) {
+        const waitSec = 10 * attempt;
+        console.warn(`[SW] 이미지 생성 429 Rate Limit, ${waitSec}초 대기 후 재시도 (${attempt}/${MAX_RETRIES})`);
+        await new Promise(r => setTimeout(r, waitSec * 1000));
+        continue;
+      }
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        const errMsg = err.error?.message || `HTTP ${resp.status}`;
+        if (attempt < MAX_RETRIES && (resp.status >= 500 || resp.status === 503)) {
+          console.warn(`[SW] 이미지 생성 ${resp.status}, 재시도 ${attempt}/${MAX_RETRIES}`);
+          await new Promise(r => setTimeout(r, 5000 * attempt));
+          continue;
+        }
+        throw new Error(errMsg);
+      }
+
+      const data = await resp.json();
+      const contentParts = data.candidates?.[0]?.content?.parts || [];
+      for (const part of contentParts) {
+        const inlineData = part.inlineData || part.inline_data;
+        if (inlineData?.data) {
+          const mimeType = inlineData.mimeType || inlineData.mime_type || 'image/png';
+          return `data:${mimeType};base64,${inlineData.data}`;
+        }
+      }
+      throw new Error('이미지 생성 응답에 이미지 데이터 없음');
+    } catch (e) {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        if (attempt < MAX_RETRIES) {
+          console.warn(`[SW] 이미지 생성 타임아웃, 재시도 ${attempt}/${MAX_RETRIES}`);
+          continue;
+        }
+        throw new Error(`이미지 생성 타임아웃 (${TIMEOUT_MS / 1000}초 × ${MAX_RETRIES}회)`);
+      }
+      if (attempt >= MAX_RETRIES) throw e;
+      console.warn(`[SW] 이미지 생성 오류, 재시도 ${attempt}/${MAX_RETRIES}: ${e.message}`);
+      await new Promise(r => setTimeout(r, 3000 * attempt));
     }
   }
-  throw new Error('이미지 생성 응답에 이미지 데이터 없음');
+
+  throw new Error('이미지 생성 재시도 횟수 초과');
 }
 
 async function uploadToCloudinary(base64Image, folder = 'map2model') {

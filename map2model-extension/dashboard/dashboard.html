@@ -61,13 +61,13 @@
           </div>
           <div class="card-body">
             <div class="map-tabs">
-              <button class="map-tab active" data-mtab="hd">행정동</button>
+              <button class="map-tab active" data-mtab="preset">명소</button>
+              <button class="map-tab" data-mtab="hd">행정동</button>
               <button class="map-tab" data-mtab="ld">법정동</button>
-              <button class="map-tab" data-mtab="preset">명소</button>
             </div>
 
-            <!-- 검색 (행정동/법정동) -->
-            <div id="map-search-area">
+            <!-- 검색 (행정동/법정동) — 초기 숨김 -->
+            <div id="map-search-area" style="display:none">
               <div class="search-box">
                 <span class="search-icon">🔍</span>
                 <input type="text" id="map-search" placeholder="동 이름 검색 (예: 성수동, 장기동)">
@@ -75,8 +75,8 @@
               <div id="map-results" class="result-list"></div>
             </div>
 
-            <!-- 프리셋 (명소) -->
-            <div id="map-preset-area" style="display:none">
+            <!-- 프리셋 (명소) — 초기 표시 -->
+            <div id="map-preset-area">
               <select id="map-preset-cat">
                 <option value="">카테고리 선택</option>
               </select>
