@@ -825,6 +825,25 @@
     return Promise.all(results);
   }
 
+  // EccoAPI용 프롬프트 래퍼 (참조 이미지 1장 전용)
+  function buildEccoPrompt(originalPrompt) {
+    let converted = (originalPrompt || '')
+      .replace(/You are given two reference images:[\s\S]*?Image 2:[^\n]+\n?/,
+        'You are given one reference image: a 3D terrain map rendering. Use the EXACT terrain from this image.\n')
+      .replace(/Frame style \(black wood, raised edges\) from Image 2/g,
+        'Frame style: black wood frame with raised edges');
+    if (!converted.includes('FILL the entire interior')) {
+      converted = converted.replace(
+        /CRITICAL RULES:\n- The terrain INSIDE the frame must come from Image 1 ONLY[^\n]*\n/,
+        `CRITICAL RULES:
+- The terrain INSIDE the frame must come from Image 1 ONLY
+- The terrain model must FILL the entire interior of the frame edge-to-edge with NO gaps, NO margins, NO visible frame bottom/backing. The 3D terrain extends to all four edges of the frame opening.
+`
+      );
+    }
+    return converted;
+  }
+
   // ========== AI 상세페이지 생성 ==========
   async function doAIGenerate() {
     if (_aiGenerating) return;
@@ -900,13 +919,14 @@
 - Image 1: A 3D terrain map rendering. Use the EXACT terrain, coastline, and geography from this image.
 - Image 2: A real product photo showing the BLACK FRAME STYLE and MATERIAL FINISH only. Do NOT copy the terrain from this image.
 
-YOUR TASK: Create a realistic product photo that combines:
-1. The terrain/geography shown in Image 1, as if it was 3D printed and placed inside that frame
-2. The exact same black frame style, material texture, and presentation from Image 2
-
-The result should look like a real photograph of the finished product — the terrain from Image 1, 3D printed and mounted in the frame style from Image 2.
-Size: ${sizeInfo}
-Output: One clean product photo, professional e-commerce style. No text, no watermarks.`
+CRITICAL RULES:
+- The terrain INSIDE the frame must come from Image 1 ONLY
+- The 3D terrain must FILL the entire frame interior edge-to-edge, NO gaps, NO margins, NO visible backing or empty space between terrain and frame
+- Frame style: black wood frame with raised edges
+- Product is a SMALL 3D printed terrain relief model (${sizeInfo}), about the size of a paperback book
+- If furniture is in the scene, the product must appear SMALL relative to it
+- Photorealistic product photography only
+- No text, no watermarks, no fantasy elements`
         : `Create a photorealistic product photo of a 3D printed terrain model (${sizeInfo}) inside a black wooden frame.
 The terrain should show landscape with roads, buildings, water, and green areas in raised 3D relief.
 Professional e-commerce product photography on clean background. No text or watermarks.`;
@@ -929,13 +949,14 @@ ${sizesText || '기본: 250×174mm — 90,000원'}
 - 건물, 도로, 공원, 물길이 모두 입체적으로 표현
 - 내가 사는 동네, 추억의 장소를 입체적으로 소장
 - 선물용으로 완벽 (집들이, 기념일, 졸업 등)
-- 액자 프레임 포함, 벽걸이 & 탁상 거치 가능
+- 액자 프레임 포함, 벽걸이 전용 설치
 - 주문 제작 (3일 이내 배송)
 
 ## FAQ 작성 시 주의
 - "액자 프레임 색상 변경 가능한가요?" 포함 금지
 - "원하는 지역은 어떻게 지정하나요?" 포함 금지
 - 제작 기간은 "3일 이내"로 안내
+- 이 제품은 벽걸이 전용입니다. 탁상 거치, 스탠드, 이젤 관련 내용을 절대 포함하지 마세요.
 
 ## 섹션 구조 (7개)
 1. hook — 후킹 감성 첫인상
@@ -957,6 +978,7 @@ ${sizesText || '기본: 250×174mm — 90,000원'}
 - 나쁜 예: "선물 포장", "리본", "배송 박스"
 - 절대 금지: infographic, split image, panel, laptop screen, text overlay, diagram
 - 모든 섹션에서 실제 제품 사진 촬영 컨셉으로만 작성하세요
+- 제품을 탁상에 세워놓는 장면 금지. 벽에 걸려있거나 평평하게 놓여있는 장면만 허용.
 
 JSON 형태로:
 {
@@ -1004,8 +1026,8 @@ JSON만 출력해.`;
               useEcco
                 ? {
                     action: 'ecco_image',
-                    prompt: heroPromptText,
-                    referenceImages: refImages,
+                    prompt: buildEccoPrompt(heroPromptText),
+                    referenceImages: [state.capturedImage],
                     aspectRatio: '3:4',
                     eccoApiKey: eccoKey
                   }
@@ -1048,6 +1070,18 @@ JSON만 출력해.`;
 
       state.aiSections = planData.sections || [];
       state.aiCopy = planData.productCopy || null;
+      if (Array.isArray(state.aiCopy?.faq)) {
+        state.aiCopy.faq = state.aiCopy.faq.map((f) => {
+          const q = (f.question || '').trim();
+          if (/탁상|거치|스탠드|이젤/.test(q)) {
+            return {
+              question: '어떻게 설치하나요?',
+              answer: '액자 뒷면에 벽걸이용 고리가 있어 벽에 간편하게 설치할 수 있습니다.'
+            };
+          }
+          return f;
+        });
+      }
       const bannedTags = ['함께 많이 찾는', '특별한 선물', '특별한선물'];
       const rawTags = [
         ...naverKeywords.slice(0, 5),
@@ -1101,8 +1135,9 @@ JSON만 출력해.`;
 ${section.visualPrompt}
 
 CRITICAL RULES:
-- The terrain INSIDE the frame must come from Image 1 ONLY, never from Image 2
-- Frame style (black wood, raised edges) from Image 2
+- The terrain INSIDE the frame must come from Image 1 ONLY
+- The terrain model must FILL the entire interior of the frame edge-to-edge with NO gaps, NO margins, NO visible frame bottom/backing. The 3D terrain extends to all four edges of the frame opening.
+- Frame style: black wood frame with raised edges
 - Product is a SMALL 3D printed terrain relief model (${sizeInfo}), about the size of a paperback book
 - If furniture is in the scene, the product must appear SMALL relative to it
 - Photorealistic product photography only
@@ -1115,8 +1150,8 @@ CRITICAL RULES:
               useEcco
                 ? {
                     action: 'ecco_image',
-                    prompt: fullPrompt,
-                    referenceImages: refs,
+                    prompt: buildEccoPrompt(fullPrompt),
+                    referenceImages: [state.capturedImage],
                     aspectRatio: sectionAspectRatio,
                     eccoApiKey: eccoKey
                   }
@@ -1454,14 +1489,24 @@ CRITICAL RULES:
       $('product-url').href = productUrl;
       $('product-url').textContent = `스마트스토어에서 보기 → ${productUrl}`;
 
-      // 히스토리 저장
+      // 히스토리 저장 (썸네일 포함)
+      let thumb = state.aiSections?.[0]?.imageUrl || '';
+      if (thumb && thumb.startsWith('data:')) {
+        try {
+          thumb = await createThumbnail(thumb, 128);
+        } catch (e) {
+          // 썸네일 리사이즈 실패 시 원본 유지
+        }
+      }
       saveHistory({
         name: prodName,
         region: $('prod-region').value.trim(),
         productNo: result.originProductNo,
         url: productUrl,
         date: new Date().toISOString(),
-        images: naverImages.length
+        images: naverImages.length,
+        thumbnail: thumb,
+        sizes: getSizes()
       });
 
     } catch (e) {
@@ -1615,23 +1660,64 @@ CRITICAL RULES:
     renderHistory();
   }
 
+  function createThumbnail(dataUrl, maxSize = 128) {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = maxSize / Math.max(img.width, img.height);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      };
+      img.src = dataUrl;
+    });
+  }
+
   function renderHistory() {
     if (state.history.length === 0) {
       $('history-grid').innerHTML = '<p class="empty-state">아직 생성된 상품이 없습니다</p>';
       return;
     }
     $('history-grid').innerHTML = state.history.map((item, i) => `
-      <div class="history-card">
+      <div class="history-card" data-index="${i}">
         ${item.thumbnail
-          ? `<img src="${item.thumbnail}" alt="${item.name}">`
+          ? `<img src="${item.thumbnail}" alt="${item.name}" style="height:160px;object-fit:cover;width:100%">`
           : `<div style="height:160px;background:#1e293b;display:flex;align-items:center;justify-content:center;color:#64748b">🗺️</div>`}
         <div class="history-card-body">
           <h4>${item.name || '제목 없음'}</h4>
           <p>${item.region || ''} · ${new Date(item.date).toLocaleDateString('ko-KR')}</p>
-          <p>${(item.sizes || []).map(s => `${s.label} ${s.price?.toLocaleString()}원`).join(' / ')}</p>
+          ${item.url ? `<a href="${item.url}" target="_blank" style="color:#3b82f6;font-size:12px;">스마트스토어에서 보기</a>` : ''}
         </div>
+        <button class="hist-delete-btn" data-index="${i}" title="삭제" style="position:absolute;top:8px;right:8px;background:rgba(239,68,68,0.8);color:#fff;border:none;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px;display:none;">✕</button>
       </div>
     `).join('');
+
+    document.querySelectorAll('.history-card').forEach(card => {
+      const delBtn = card.querySelector('.hist-delete-btn');
+      card.style.position = 'relative';
+      card.style.cursor = 'pointer';
+      card.addEventListener('mouseenter', () => { delBtn.style.display = 'block'; });
+      card.addEventListener('mouseleave', () => { delBtn.style.display = 'none'; });
+
+      card.addEventListener('click', (e) => {
+        if (e.target.classList.contains('hist-delete-btn')) return;
+        const idx = parseInt(card.dataset.index, 10);
+        const item = state.history[idx];
+        if (item?.url) window.open(item.url, '_blank');
+      });
+
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(delBtn.dataset.index, 10);
+        if (confirm(`"${state.history[idx]?.name}" 히스토리를 삭제하시겠습니까?`)) {
+          state.history.splice(idx, 1);
+          try { localStorage.setItem('m2m_history', JSON.stringify(state.history)); } catch (err) {}
+          renderHistory();
+        }
+      });
+    });
   }
 
   // ========== 설정 ==========
