@@ -432,9 +432,23 @@
       handleSampleFiles(e.dataTransfer.files);
     });
     sampleFile.addEventListener('change', () => handleSampleFiles(sampleFile.files));
-    chrome.storage.local.get('saved_sample_images', (saved) => {
+    chrome.storage.local.get('saved_sample_images', async (saved) => {
       if (saved.saved_sample_images && saved.saved_sample_images.length > 0) {
-        state.sampleImages = saved.saved_sample_images;
+        // 기존 저장분도 1MB 이하로 압축
+        const compressed = [];
+        for (const img of saved.saved_sample_images) {
+          if (img.length > 1024 * 1024) {
+            const c = await compressImage(img, 1024, 0.7);
+            compressed.push(c);
+          } else {
+            compressed.push(img);
+          }
+        }
+        state.sampleImages = compressed;
+        if (compressed.length !== saved.saved_sample_images.length ||
+            compressed.some((c, i) => c !== saved.saved_sample_images[i])) {
+          chrome.storage.local.set({ saved_sample_images: compressed });
+        }
         renderSampleThumbs();
         prodLog(`📸 저장된 샘플 사진 ${state.sampleImages.length}장 로드`);
       }
@@ -632,12 +646,39 @@
       }
       const reader = new FileReader();
       reader.onload = (e) => {
-        state.sampleImages.push(e.target.result);
-        renderSampleThumbs();
-        chrome.storage.local.set({ saved_sample_images: state.sampleImages });
-        prodLog(`📸 샘플 사진 추가 (${state.sampleImages.length}/3)`);
+        // 1MB 이하로 압축 (API 참조이미지 크기 제한 대응)
+        compressImage(e.target.result, 1024, 0.7).then(compressed => {
+          const beforeKB = (e.target.result.length / 1024).toFixed(0);
+          const afterKB = (compressed.length / 1024).toFixed(0);
+          state.sampleImages.push(compressed);
+          renderSampleThumbs();
+          chrome.storage.local.set({ saved_sample_images: state.sampleImages });
+          prodLog(`📸 샘플 사진 추가 (${state.sampleImages.length}/3) — ${beforeKB}KB→${afterKB}KB`);
+        });
       };
       reader.readAsDataURL(file);
+    });
+  }
+
+  function compressImage(dataUrl, maxDim, quality) {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.naturalWidth;
+        let h = img.naturalHeight;
+        if (w > maxDim || h > maxDim) {
+          const scale = maxDim / Math.max(w, h);
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = dataUrl;
     });
   }
 

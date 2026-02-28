@@ -105,6 +105,9 @@ class SmartStoreAPI {
       if (!t || t.length < 2) continue;
       const norm = t.replace(/\s/g, '');
       if (seenNorm.has(norm) || bannedTags.includes(norm)) continue;
+      // 30byte 초과 태그 제거 (네이버 API 제한)
+      const byteLen = new TextEncoder().encode(t).length;
+      if (byteLen > 30) continue;
       seenNorm.add(norm);
       sellerTags.push({ text: t });
       if (sellerTags.length >= 10) break;
