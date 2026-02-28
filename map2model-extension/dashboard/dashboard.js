@@ -25,6 +25,7 @@
   };
   let _aiGenerating = false;
   let _uploading = false;
+  let _batchRunning = false;
 
   const $ = id => document.getElementById(id);
 
@@ -60,6 +61,7 @@
       const total = state.presets.reduce((s, c) => s + c.items.length, 0);
       mapLog(`📂 명소 프리셋: ${state.presets.length} 카테고리, ${total}개 장소`);
       renderPresets();
+      renderBatchList();
     } catch (e) { mapLog(`❌ 프리셋 로드 실패`, 'err'); }
   }
 
@@ -151,7 +153,17 @@
 
     // 시작 버튼
     $('map-start-btn').addEventListener('click', doMapStart);
-    $('map-batch-auto-btn')?.addEventListener('click', runBatchAuto);
+    $('batch-start-btn')?.addEventListener('click', () => {
+      if (_batchRunning) return;
+      runBatchAuto();
+    });
+    $('batch-check-all')?.addEventListener('change', (e) => {
+      document.querySelectorAll('.batch-chk, .batch-cat-chk').forEach(chk => {
+        chk.checked = e.target.checked;
+        chk.indeterminate = false;
+      });
+      updateBatchCount();
+    });
   }
 
   function doSearch() {
@@ -254,7 +266,6 @@
   function renderPresets() {
     const catSel = $('map-preset-cat');
     const itemSel = $('map-preset-item');
-    const selectAll = $('map-preset-select-all');
 
     state.presets.forEach((cat, i) => {
       const o = document.createElement('option');
@@ -269,7 +280,7 @@
       $('map-preset-desc').style.display = 'none';
       state.selectedPreset = null;
       updateSelInfo();
-      renderPresetChecklist();
+      renderBatchList();
       if (idx === '') { itemSel.disabled = true; return; }
       const cat = state.presets[parseInt(idx, 10)];
       cat.items.sort((a, b) => a.name.localeCompare(b.name, 'ko')).forEach((item, i) => {
@@ -277,7 +288,7 @@
         o.value = i; o.textContent = item.name;
         itemSel.appendChild(o);
       });
-      renderPresetChecklist(parseInt(idx, 10));
+      renderBatchList();
       itemSel.disabled = false;
       // 카테고리 선택 시 아이템 셀렉트 자동 포커스 + 드롭다운 열기
       setTimeout(() => {
@@ -309,57 +320,87 @@
       updateSelInfo();
       mapLog(`✅ 명소: ${item.name}`);
     });
-
-    if (selectAll) {
-      selectAll.addEventListener('change', () => {
-        document.querySelectorAll('.preset-batch-chk').forEach(chk => {
-          chk.checked = selectAll.checked;
-        });
-      });
-    }
   }
 
-  function renderPresetChecklist(catIdx) {
-    const wrap = $('map-preset-checklist');
-    const selectAll = $('map-preset-select-all');
-    if (!wrap) return;
-    if (catIdx === undefined || Number.isNaN(catIdx)) {
-      wrap.innerHTML = '';
-      if (selectAll) selectAll.checked = false;
+  // 카테고리 드롭다운과 무관하게 전체 프리셋 배치 리스트 렌더링
+  function renderBatchList() {
+    const batchArea = $('batch-area');
+    const batchList = $('batch-list');
+    if (!batchArea || !batchList) return;
+
+    if (!state.presets || state.presets.length === 0) {
+      batchArea.style.display = 'none';
       return;
     }
+    batchArea.style.display = 'block';
 
-    const items = state.presets[catIdx]?.items || [];
-    wrap.innerHTML = items.map((item, idx) => (
-      `<label class="mini-check" style="display:flex;margin-bottom:4px">
-        <input type="checkbox" class="preset-batch-chk" data-cat="${catIdx}" data-item="${idx}">
-        ${item.name}
-      </label>`
-    )).join('');
+    let html = '';
+    state.presets.forEach((cat, catIdx) => {
+      if (!cat.items || cat.items.length === 0) return;
+      html += `
+        <div class="batch-category" style="margin-bottom:12px;">
+          <label style="display:flex;align-items:center;padding:6px 8px;cursor:pointer;color:#93c5fd;font-size:13px;font-weight:bold;background:#1e3a5f;border-radius:4px;margin-bottom:4px;">
+            <input type="checkbox" class="batch-cat-chk" data-cat="${catIdx}" style="margin-right:8px;" />
+            ${cat.category || cat.name || `카테고리 ${catIdx + 1}`} (${cat.items.length})
+          </label>
+          <div class="batch-cat-items" style="padding-left:12px;">
+            ${cat.items.map((item, itemIdx) => `
+              <label class="batch-item" style="display:flex;align-items:center;padding:4px 8px;cursor:pointer;border-radius:4px;color:#e2e8f0;font-size:12px;"
+                     onmouseenter="this.style.background='#334155'" onmouseleave="this.style.background=''">
+                <input type="checkbox" class="batch-chk" data-cat="${catIdx}" data-idx="${itemIdx}" style="margin-right:8px;" />
+                ${item.name.replace(/\//g, ' ')}
+              </label>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    });
+    batchList.innerHTML = html;
 
-    wrap.querySelectorAll('.preset-batch-chk').forEach(chk => {
+    updateBatchCount();
+
+    batchList.querySelectorAll('.batch-chk').forEach(chk => {
       chk.addEventListener('change', () => {
-        const all = wrap.querySelectorAll('.preset-batch-chk');
-        const checked = wrap.querySelectorAll('.preset-batch-chk:checked');
-        if (selectAll) selectAll.checked = all.length > 0 && all.length === checked.length;
+        updateCategoryCheckState(chk.dataset.cat);
+        updateBatchCount();
       });
     });
-    if (selectAll) selectAll.checked = false;
+    batchList.querySelectorAll('.batch-cat-chk').forEach(catChk => {
+      catChk.addEventListener('change', () => {
+        const catIdx = catChk.dataset.cat;
+        batchList.querySelectorAll(`.batch-chk[data-cat="${catIdx}"]`).forEach(chk => {
+          chk.checked = catChk.checked;
+        });
+        updateBatchCount();
+      });
+    });
+    $('batch-check-all').checked = false;
   }
 
-  function getCheckedPresets() {
-    const checked = Array.from(document.querySelectorAll('.preset-batch-chk:checked'));
-    return checked.map(chk => {
-      const catIdx = parseInt(chk.dataset.cat, 10);
-      const itemIdx = parseInt(chk.dataset.item, 10);
-      const preset = state.presets[catIdx]?.items?.[itemIdx];
-      if (!preset) return null;
-      return {
-        ...preset,
-        _catIdx: catIdx,
-        _itemIdx: itemIdx
-      };
-    }).filter(Boolean);
+  // 카테고리 체크 상태 동기화
+  function updateCategoryCheckState(catIdx) {
+    const items = document.querySelectorAll(`.batch-chk[data-cat="${catIdx}"]`);
+    const checkedItems = document.querySelectorAll(`.batch-chk[data-cat="${catIdx}"]:checked`);
+    const catChk = document.querySelector(`.batch-cat-chk[data-cat="${catIdx}"]`);
+    if (catChk) {
+      catChk.checked = items.length > 0 && items.length === checkedItems.length;
+      catChk.indeterminate = checkedItems.length > 0 && checkedItems.length < items.length;
+    }
+  }
+
+  function updateBatchCount() {
+    const all = document.querySelectorAll('.batch-chk');
+    const checked = document.querySelectorAll('.batch-chk:checked');
+    $('batch-count').textContent = `${checked.length}개 선택`;
+    $('batch-start-btn').disabled = checked.length === 0 || _batchRunning;
+    $('batch-start-btn').textContent = checked.length > 0
+      ? `🚀 ${checked.length}개 일괄 자동등록 시작`
+      : '🚀 선택 항목 일괄 자동등록';
+    const allChk = $('batch-check-all');
+    if (allChk) {
+      allChk.checked = all.length > 0 && checked.length === all.length;
+      allChk.indeterminate = checked.length > 0 && checked.length < all.length;
+    }
   }
 
   // ── 맵 생성 시작 ──
@@ -1082,7 +1123,13 @@ JSON만 출력해.`;
           return f;
         });
       }
-      const bannedTags = ['함께 많이 찾는', '특별한 선물', '특별한선물'];
+      const bannedTags = [
+        '함께 많이 찾는', '특별한 선물', '특별한선물',
+        '벽걸이액자', '벽걸이', '액자', '탁상액자',
+        '무료배송', '당일배송', '할인', '세일', '최저가',
+        '인기상품', '추천상품', '베스트', '1위',
+        '정품', '가품', '짝퉁', '리뷰', '후기'
+      ];
       const rawTags = [
         ...naverKeywords.slice(0, 5),
         ...(planData.tags || [])
@@ -1518,49 +1565,120 @@ CRITICAL RULES:
   }
 
   // ========== 풀 오토 ==========
+  async function doCaptureMap() {
+    await doCapture();
+  }
+
+  async function doBuildAndUpload() {
+    setStep(4, false);
+    renderPreview();
+    setStep(5, false);
+    await doUpload();
+  }
+
   async function runBatchAuto() {
-    const checkedPresets = getCheckedPresets();
-    if (checkedPresets.length === 0) {
-      prodLog('❌ 체크된 프리셋이 없습니다.', 'err');
-      return;
-    }
+    const checkedBoxes = [...document.querySelectorAll('.batch-chk:checked')];
+    if (checkedBoxes.length === 0) return;
 
-    for (const preset of checkedPresets) {
-      const cleanName = (preset.name || '').replace(/\//g, ' ').replace(/\s+/g, ' ').trim();
-      prodLog(`\n🚀 [${cleanName}] 시작...`);
+    _batchRunning = true;
+    $('batch-start-btn').disabled = true;
+    $('batch-progress').style.display = 'block';
 
-      state.mapTab = 'preset';
-      state.selectedPreset = preset;
-      updateSelInfo();
-      $('prod-region').value = cleanName;
-      $('prod-region-auto').checked = true;
+    const totalCount = checkedBoxes.length;
+    let doneCount = 0;
+    let failCount = 0;
+    const results = [];
 
-      // 1) 지도 전송 + 탭 전환
-      await doMapStart();
+    try {
+      for (const chk of checkedBoxes) {
+        const catIdx = parseInt(chk.dataset.cat, 10);
+        const itemIdx = parseInt(chk.dataset.idx, 10);
+        const preset = state.presets[catIdx].items[itemIdx];
+        const cleanName = preset.name.replace(/\//g, ' ').replace(/\s+/g, ' ').trim();
 
-      // 2) 렌더링 대기
-      await new Promise(r => setTimeout(r, 30000));
+        doneCount++;
+        const pct = Math.round((doneCount / totalCount) * 100);
+        $('batch-progress-bar').style.width = `${pct}%`;
+        $('batch-progress-bar').textContent = `${doneCount}/${totalCount}`;
+        $('batch-status').textContent = `🚀 [${doneCount}/${totalCount}] ${cleanName} 처리 중...`;
 
-      // 3) 캡처
-      await doCapture();
-      if (!state.capturedImage) {
-        prodLog(`❌ [${cleanName}] 캡처 실패로 스킵`, 'err');
-        continue;
+        try {
+          // === Step 1: 프리셋 선택 + 지역명 설정 ===
+          state.mapTab = 'preset';
+          state.selectedPreset = preset;
+          updateSelInfo();
+          $('prod-region').value = cleanName;
+
+          // 사이즈 계산
+          const sw = preset.bounds[0];
+          const ne = preset.bounds[1];
+          const calcSize = calcSizeFromBounds(sw, ne);
+          $('prod-name').value = `${cleanName} 3D 지형 모형 액자 (${calcSize.label})`;
+
+          prodLog(`\n${'═'.repeat(50)}`);
+          prodLog(`🚀 [배치 ${doneCount}/${totalCount}] ${cleanName} 시작`);
+
+          // === Step 2: 지도 전송 + map2model 탭 전환 ===
+          await doMapStart();
+
+          // === Step 3: 모델링 완료 대기 (60초) ===
+          prodLog('⏳ 모델링 대기 60초...');
+          for (let sec = 60; sec > 0; sec--) {
+            $('batch-status').textContent = `⏳ [${doneCount}/${totalCount}] ${cleanName} — 모델링 대기 ${sec}초...`;
+            await new Promise(r => setTimeout(r, 1000));
+          }
+
+          // === Step 4: 캡처 ===
+          prodLog('📸 캡처 시작...');
+          $('batch-status').textContent = `📸 [${doneCount}/${totalCount}] ${cleanName} — 캡처 중...`;
+          await doCaptureMap();
+          if (!state.capturedImage) throw new Error('캡처 실패 — capturedImage가 비어있음');
+
+          // === Step 5: AI 생성 ===
+          prodLog('🎨 AI 생성 시작...');
+          $('batch-status').textContent = `🎨 [${doneCount}/${totalCount}] ${cleanName} — AI 생성 중...`;
+          await doAIGenerate();
+
+          // === Step 6: HTML 빌드 + 업로드 ===
+          prodLog('📤 업로드 시작...');
+          $('batch-status').textContent = `📤 [${doneCount}/${totalCount}] ${cleanName} — 업로드 중...`;
+          await doBuildAndUpload();
+
+          prodLog(`✅ [배치] ${cleanName} 완료!`, 'ok');
+          results.push({ name: cleanName, status: 'success' });
+          chk.parentElement.style.background = '#166534';
+          chk.parentElement.style.color = '#4ade80';
+        } catch (e) {
+          failCount++;
+          prodLog(`❌ [배치] ${cleanName} 실패: ${e.message}`, 'err');
+          results.push({ name: cleanName, status: 'fail', error: e.message });
+          chk.parentElement.style.background = '#7f1d1d';
+          chk.parentElement.style.color = '#f87171';
+        }
+
+        if (doneCount < totalCount) {
+          $('batch-status').textContent = '⏸️ 다음 항목 준비 중 (5초)...';
+          await new Promise(r => setTimeout(r, 5000));
+        }
       }
 
-      // 4) AI 생성
-      await doAIGenerate();
+      $('batch-progress-bar').style.width = '100%';
+      $('batch-progress-bar').textContent = '완료!';
+      $('batch-status').textContent = `🎉 배치 완료! 성공 ${totalCount - failCount}개 / 실패 ${failCount}개`;
+      $('batch-start-btn').textContent = '🚀 다시 실행';
+      $('batch-start-btn').disabled = false;
 
-      // 5) HTML/업로드
-      setStep(4, false);
-      renderPreview();
-      setStep(5, false);
-      await doUpload();
-
-      prodLog(`✅ [${cleanName}] 완료!`);
-      await new Promise(r => setTimeout(r, 5000));
+      prodLog(`\n${'═'.repeat(50)}`);
+      prodLog('🎉 배치 자동등록 완료!');
+      prodLog(`   성공: ${totalCount - failCount}개`);
+      prodLog(`   실패: ${failCount}개`);
+      results.forEach(r => {
+        prodLog(`   ${r.status === 'success' ? '✅' : '❌'} ${r.name}${r.error ? `: ${r.error}` : ''}`);
+      });
+    } finally {
+      _batchRunning = false;
+      updateBatchCount();
     }
-    prodLog(`\n🎉 배치 완료! ${checkedPresets.length}개 상품 등록`);
   }
 
   async function doFullAuto() {

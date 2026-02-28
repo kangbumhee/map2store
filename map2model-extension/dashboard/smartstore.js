@@ -97,19 +97,28 @@ class SmartStoreAPI {
 
   // ── 상품 데이터 구성 (oliveyoung-smart-store 검증 구조) ──
   buildProductData({ name, description, detailHtml, images, sizes, categoryId, returnInfo, settings, tags }) {
-    // 네이버는 띄어쓰기 무시 후 중복 판정 → 정규화 중복 제거
-    const bannedTags = ['특별한선물', '함께많이찾는'];
-    const seenNorm = new Set();
+    const bannedWords = ['벽걸이', '액자', '탁상', '무료배송', '당일배송', '할인', '세일', '최저가', '인기', '추천', '베스트', '1위', '정품', '리뷰', '후기', '함께 많이 찾는', '특별한 선물', '특별한선물'];
+    const rawTags = tags || [];
     const sellerTags = [];
-    for (const t of (tags || [])) {
-      if (!t || t.length < 2) continue;
-      const norm = t.replace(/\s/g, '');
-      if (seenNorm.has(norm) || bannedTags.includes(norm)) continue;
-      // 30byte 초과 태그 제거 (네이버 API 제한)
-      const byteLen = new TextEncoder().encode(t).length;
+    const seen = new Set();
+
+    for (const t of rawTags) {
+      const tag = (t || '').trim().replace(/\s+/g, '');
+      if (tag.length < 2) continue;
+      if (seen.has(tag)) continue;
+
+      const byteLen = new TextEncoder().encode(tag).length;
       if (byteLen > 30) continue;
-      seenNorm.add(norm);
-      sellerTags.push({ text: t });
+
+      // 금지 단어 부분 포함 체크
+      const hasBanned = bannedWords.some(b => tag.includes(b) || tag.includes(b.replace(/\s/g, '')));
+      if (hasBanned) {
+        console.log(`[태그 제외] "${tag}" — 금지 단어 포함`);
+        continue;
+      }
+
+      seen.add(tag);
+      sellerTags.push({ text: tag });
       if (sellerTags.length >= 10) break;
     }
 
