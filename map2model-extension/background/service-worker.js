@@ -330,8 +330,8 @@ async function fetchApiyiText(prompt, apiKey, maxTokens = 8192) {
 }
 
 async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio = '9:16') {
-  // Nano Banana 2 (공식 문서 기준)
-  const url = 'https://api.apiyi.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent';
+  // Nano Banana 일반 — $0.02/장
+  const url = 'https://api.apiyi.com/v1beta/models/gemini-2.5-flash-image:generateContent';
   const parts = [];
 
   // 참조 이미지 (최대 3장) — camelCase (공식 문서 기준)
@@ -367,7 +367,7 @@ async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-      console.log(`[SW] 이미지 생성 시도 ${attempt}/${MAX_RETRIES} (Nano Banana 2, 2K)`);
+      console.log(`[SW] 이미지 생성 시도 ${attempt}/${MAX_RETRIES} (Nano Banana 일반, 2K)`);
 
       const resp = await fetch(url, {
         method: 'POST',
