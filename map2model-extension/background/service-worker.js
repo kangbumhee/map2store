@@ -265,9 +265,56 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // EccoAPI 이미지 생성 프록시
   if (msg.action === 'ecco_image') {
-    fetchEccoImage(msg.prompt, msg.referenceImages, msg.aspectRatio, msg.eccoApiKey)
-      .then(result => sendResponse({ success: true, ...result }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
+    (async () => {
+      const { prompt, referenceImages, aspectRatio, eccoApiKey } = msg;
+      try {
+        const body = {
+          prompt,
+          aspectRatio: aspectRatio || '1:1'
+        };
+
+        // NanoBanana는 참조 이미지 1장만 지원 — 캡처(지형) 우선
+        if (referenceImages && referenceImages.length > 0) {
+          const img = referenceImages[0];
+          const match = img.match(/^data:image\/([a-z+]+);base64,(.+)$/);
+          if (match) {
+            body.imageBase64 = [{
+              data: match[2],
+              mimeType: `image/${match[1]}`
+            }];
+          }
+        }
+
+        const resp = await fetch('https://eccoapi.com/api/v1/nanobanana/generate', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${eccoApiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(body)
+        });
+
+        const data = await resp.json().catch(() => ({}));
+        if (data.code === 200 && data.data?.assetUrl) {
+          const imgResp = await fetch(data.data.assetUrl);
+          const blob = await imgResp.blob();
+          const arrayBuf = await blob.arrayBuffer();
+          const bytes = new Uint8Array(arrayBuf);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          const base64 = `data:${blob.type || 'image/png'};base64,${btoa(binary)}`;
+
+          console.log(`[SW] ✅ EccoAPI 성공 (비용: $${data.meta?.cost}, 잔액: $${data.meta?.remaining_credits})`);
+          sendResponse({ success: true, imageData: base64 });
+        } else {
+          console.log(`[SW] ❌ EccoAPI 실패: ${data.msg}`);
+          sendResponse({ success: false, error: data.msg || 'EccoAPI 오류' });
+        }
+      } catch (e) {
+        console.log(`[SW] ❌ EccoAPI 에러: ${e.message}`);
+        sendResponse({ success: false, error: e.message });
+      }
+    })();
     return true;
   }
 
@@ -437,55 +484,6 @@ async function fetchApiyiImage(prompt, apiKey, referenceImages = [], aspectRatio
   }
 }
 
-async function fetchEccoImage(prompt, referenceImages = [], aspectRatio = '1:1', eccoApiKey = '') {
-  if (!eccoApiKey) throw new Error('EccoAPI 키가 없습니다.');
-
-  const imageBase64 = (referenceImages || [])
-    .map(img => (img || '').replace(/^data:image\/[a-z+]+;base64,/, ''))
-    .filter(Boolean);
-
-  const body = {
-    prompt,
-    aspectRatio: aspectRatio || '1:1',
-    ...(imageBase64.length > 0 ? { imageBase64 } : {})
-  };
-
-  const resp = await fetch('https://eccoapi.com/api/v1/nanobanana/generate', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${eccoApiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  });
-
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(data?.msg || `EccoAPI HTTP ${resp.status}`);
-  }
-  if (data.code !== 200) {
-    throw new Error(data.msg || 'EccoAPI 실패');
-  }
-
-  const assetUrl = data.data?.assetUrl || data.data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.assetUrl;
-  if (!assetUrl) throw new Error('EccoAPI 응답에 assetUrl이 없습니다.');
-
-  const imgResp = await fetch(assetUrl);
-  if (!imgResp.ok) throw new Error(`Ecco asset 다운로드 실패: HTTP ${imgResp.status}`);
-  const blob = await imgResp.blob();
-  const arrayBuf = await blob.arrayBuffer();
-  const bytes = new Uint8Array(arrayBuf);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  const mimeType = blob.type || 'image/png';
-  const base64 = `data:${mimeType};base64,${btoa(binary)}`;
-
-  return {
-    imageData: base64,
-    cost: data.meta?.cost,
-    remaining: data.meta?.remaining_credits
-  };
-}
 
 async function uploadToCloudinary(base64Image, folder = 'map2model') {
   if (base64Image.startsWith('http')) return base64Image;

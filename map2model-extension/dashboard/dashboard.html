@@ -83,11 +83,25 @@
               <select id="map-preset-item" disabled style="margin-top:8px">
                 <option value="">장소 선택</option>
               </select>
-              <label class="mini-check" style="margin-top:8px;display:inline-flex">
-                <input type="checkbox" id="map-preset-select-all"> 현재 카테고리 전체 선택/해제
-              </label>
-              <div id="map-preset-checklist" class="selected-tags" style="max-height:220px;overflow:auto;margin-top:8px"></div>
-              <button id="map-batch-auto-btn" class="btn-secondary" style="margin-top:8px;width:100%">🚀 선택 항목 일괄 자동등록</button>
+              <!-- 배치 자동등록 영역 -->
+              <div id="batch-area" style="display:none; margin-top:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                  <label style="color:#fff; font-weight:bold;">
+                    <input type="checkbox" id="batch-check-all" /> 전체 선택
+                  </label>
+                  <span id="batch-count" style="color:#94a3b8; font-size:13px;">0개 선택</span>
+                </div>
+                <div id="batch-list" style="max-height:400px; overflow-y:auto; background:#1e293b; border-radius:8px; padding:8px;"></div>
+                <button id="batch-start-btn" style="margin-top:12px; width:100%; padding:12px; background:#22c55e; color:#fff; border:none; border-radius:8px; font-size:15px; font-weight:bold; cursor:pointer;" disabled>
+                  🚀 선택 항목 일괄 자동등록
+                </button>
+                <div id="batch-progress" style="display:none; margin-top:12px;">
+                  <div style="background:#334155; border-radius:8px; overflow:hidden; height:24px;">
+                    <div id="batch-progress-bar" style="background:#22c55e; height:100%; width:0%; transition:width 0.3s; display:flex; align-items:center; justify-content:center; color:#fff; font-size:12px; font-weight:bold;"></div>
+                  </div>
+                  <p id="batch-status" style="color:#94a3b8; font-size:13px; margin-top:4px;"></p>
+                </div>
+              </div>
               <p id="map-preset-desc" class="preset-desc" style="display:none"></p>
             </div>
 
